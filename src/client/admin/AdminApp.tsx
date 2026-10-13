@@ -41,6 +41,8 @@ import { LinePage } from "./settings/LinePage.tsx";
 import { EmailPage } from "./settings/EmailPage.tsx";
 import { PrivacySettingsPage } from "./settings/PrivacySettingsPage.tsx";
 import { SystemStatusPage } from "./pages/SystemStatusPage.tsx";
+import { AdminMenuPage } from "./pages/AdminMenuPage.tsx";
+import type { AdminMenuDto } from "../../shared/admin-menu.ts";
 import { ReportPrintPage } from "./reports/ReportPrintPage.tsx";
 import { ReportsPage } from "./reports/ReportsPage.tsx";
 import "../styles/admin.css";
@@ -69,6 +71,8 @@ export function AdminApp({ locale, segments }: { locale: Locale; segments: strin
     return { ...base, errors: { ...c.errors, ...base.errors } };
   }, [locale.code, c]);
   const [me, setMe] = useState<CurrentUserDto | null | undefined>(undefined);
+  /** null until loaded for the signed-in user: the sidebar waits for it, so hidden items never flash. */
+  const [hiddenMenu, setHiddenMenu] = useState<string[] | null>(null);
   const [sessionExpired, setSessionExpired] = useState(false);
   useNoIndex();
 
@@ -86,6 +90,18 @@ export function AdminApp({ locale, segments }: { locale: Locale; segments: strin
       });
     return () => controller.abort();
   }, []);
+
+  // Sidebar items hidden by Super Admin (Administration → Menu), once signed in.
+  const meId = me?.id ?? null;
+  useEffect(() => {
+    setHiddenMenu(null);
+    if (!meId) return;
+    const controller = new AbortController();
+    apiGet<AdminMenuDto>("/api/auth/menu", controller.signal)
+      .then((d) => setHiddenMenu(d.hidden))
+      .catch(() => !controller.signal.aborted && setHiddenMenu([])); // the full menu is the safe fallback
+    return () => controller.abort();
+  }, [meId]);
 
   // Any 401 later (expired / revoked session) sends the user back to the login page.
   useEffect(() => {
@@ -120,12 +136,14 @@ export function AdminApp({ locale, segments }: { locale: Locale; segments: strin
         if (next) setSessionExpired(false);
         setMe(next);
       },
+      hiddenMenu: hiddenMenu ?? [],
+      setHiddenMenu,
       can: (permission: PermissionCode) => !!me?.permissions.includes(permission),
       go,
       href,
       logout,
     }),
-    [locale, t, c, me, go, href, logout],
+    [locale, t, c, me, hiddenMenu, go, href, logout],
   );
 
   const page = segments[0] ?? "";
@@ -147,7 +165,7 @@ export function AdminApp({ locale, segments }: { locale: Locale; segments: strin
   }, [me, isPublicPage, page, here, locale, navigate]);
 
   let content;
-  if (me === undefined) {
+  if (me === undefined || (me && !isPublicPage && hiddenMenu === null)) {
     content = <p className="adm-loading" role="status">{t.common.loading}</p>;
   } else if (isPublicPage || me === null) {
     content =
@@ -240,6 +258,8 @@ function renderPage(segments: string[], notFound: string) {
       return <SecurityEventsPage />;
     case "system":
       return <SystemStatusPage />;
+    case "admin-menu":
+      return <AdminMenuPage />;
     case "audit-logs":
       return <AuditLogsPage />;
     case "change-password":

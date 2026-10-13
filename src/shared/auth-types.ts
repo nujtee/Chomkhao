@@ -17,6 +17,7 @@ export const PERMISSION_CODES = [
   "content.view", "content.home", "content.gallery", "content.history", "content.publish", "seo.edit",
   "marketing.view", "marketing.edit",
   "settings.website", "settings.branding", "settings.theme", "settings.booking_cta", "settings.line", "settings.privacy",
+  "settings.admin_menu",
   "users.view", "users.create", "users.edit", "users.delete", "users.manage_roles", "users.manage_permissions",
   "users.reset_password", "users.suspend", "users.force_logout", "users.restore",
   "roles.view", "security_events.view", "audit_logs.view", "notifications.view",

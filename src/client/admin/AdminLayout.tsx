@@ -17,7 +17,7 @@ function readOpenGroups(): string[] {
 }
 
 export function AdminLayout({ currentPath, children }: { currentPath: string; children: ReactNode }) {
-  const { t, me, can, href, logout, locale } = useAdmin();
+  const { t, me, can, href, logout, locale, hiddenMenu } = useAdmin();
   const { pathname } = useRouter();
   const [open, setOpen] = useState(false);
 
@@ -89,7 +89,7 @@ export function AdminLayout({ currentPath, children }: { currentPath: string; ch
       <aside id="adm-sidebar" className={`adm-sidebar ${open ? "adm-sidebar--open" : ""}`}>
         <nav aria-label={t.nav.adminNavigation}>
           {ADMIN_NAV.map((group) => {
-            const items = group.items.filter((item) => can(item.permission));
+            const items = group.items.filter((item) => can(item.permission) && !hiddenMenu.includes(item.path));
             if (items.length === 0) return null;
             const label = group.label?.(t);
             const listId = `adm-nav-${group.id}`;

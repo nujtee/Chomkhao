@@ -106,7 +106,7 @@ describe("authentication and authorization on every admin route", () => {
   });
 
   it("session-only auth routes refuse anonymous callers", async () => {
-    for (const [method, path] of [["GET", "/api/auth/me"], ["POST", "/api/auth/logout"], ["POST", "/api/auth/refresh"], ["POST", "/api/auth/change-password"]] as const) {
+    for (const [method, path] of [["GET", "/api/auth/me"], ["GET", "/api/auth/menu"], ["POST", "/api/auth/logout"], ["POST", "/api/auth/refresh"], ["POST", "/api/auth/change-password"]] as const) {
       const res = await h.api(method, path, { body: method === "POST" ? {} : undefined });
       assert.equal(res.status, 401, `${method} ${path}`);
     }

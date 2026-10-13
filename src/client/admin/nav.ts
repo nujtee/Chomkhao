@@ -98,6 +98,7 @@ export const ADMIN_NAV: NavGroup[] = [
       { path: "roles", label: (t) => t.nav.roles, permission: "roles.view", ready: true },
       { path: "permissions", label: (t) => t.nav.permissions, permission: "roles.view", ready: true },
       { path: "security-events", label: (t) => t.nav.securityEvents, permission: "security_events.view", ready: true },
+      { path: "admin-menu", label: (t) => t.nav.adminMenu, permission: "settings.admin_menu", ready: true },
     ],
   },
   {

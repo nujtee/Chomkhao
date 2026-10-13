@@ -11,6 +11,9 @@ export interface AdminContextValue {
   c: AdminCmsMessages;
   me: CurrentUserDto | null;
   setMe: (me: CurrentUserDto | null) => void;
+  /** Sidebar items Super Admin hid for everyone (Administration → Menu); menu only, not access. */
+  hiddenMenu: string[];
+  setHiddenMenu: (paths: string[]) => void;
   /** Hides/shows UI only — the Worker enforces every permission. */
   can: (permission: PermissionCode) => boolean;
   /** Navigate within the admin: go("users", id) → /{lang}/admin/users/{id} */

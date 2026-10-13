@@ -304,6 +304,34 @@ await check("SEO: save title; redirect to reserved path refused", async () => {
   await pa.screenshot({ path: `${SHOTS}/g-admin-seo.png`, fullPage: true });
 });
 
+await check("Administration → Menu: hide the Marketing group and Kitchen report for everyone, then show them again", async () => {
+  await pa.goto(`${BASE}/en/admin/admin-menu`);
+  await pa.getByRole("heading", { name: "Admin menu" }).waitFor();
+  const nav = pa.getByRole("navigation", { name: "Admin navigation" });
+  await nav.getByRole("button", { name: "Marketing" }).waitFor();
+  // The start page and this page cannot be unticked.
+  if (!(await pa.getByRole("checkbox", { name: "Dashboard · Always shown" }).isDisabled())) throw new Error("dashboard hideable");
+  if (!(await pa.getByRole("checkbox", { name: "Admin menu · Always shown" }).isDisabled())) throw new Error("menu page hideable");
+  await pa.getByRole("group", { name: "Marketing" }).getByLabel("Show the whole group").uncheck();
+  await pa.getByRole("group", { name: "Food" }).getByLabel("Kitchen report").uncheck();
+  await pa.getByText("32 of 36 items shown").waitFor();
+  await pa.getByRole("button", { name: "Save" }).click();
+  await pa.getByText(/Menu saved/).waitFor();
+  await nav.getByRole("button", { name: "Marketing" }).waitFor({ state: "detached" });
+  await pa.screenshot({ path: `${SHOTS}/g-admin-menu.png`, fullPage: true });
+  // For everyone, after a reload too; the pages themselves still open for people allowed to see them.
+  await pa.goto(`${BASE}/en/admin/kitchen`);
+  await pa.getByRole("heading", { name: "Kitchen report" }).first().waitFor();
+  if (await nav.getByRole("link", { name: "Kitchen report" }).count()) throw new Error("kitchen still in the menu");
+  await nav.getByRole("link", { name: "Food orders" }).waitFor();
+  if (await nav.getByRole("button", { name: "Marketing" }).count()) throw new Error("marketing back after reload");
+  await pa.goto(`${BASE}/en/admin/admin-menu`);
+  await pa.getByRole("button", { name: "Show every item" }).click();
+  await pa.getByRole("button", { name: "Save" }).click();
+  await pa.getByText(/Menu saved/).waitFor();
+  await nav.getByRole("button", { name: "Marketing" }).waitFor();
+});
+
 await check("website settings + booking rules", async () => {
   await pa.goto(`${BASE}/en/admin/settings-website`);
   await pa.getByLabel("Payment hold (minutes)").fill("45");

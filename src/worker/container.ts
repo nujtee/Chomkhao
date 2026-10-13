@@ -1,3 +1,5 @@
+import { AdminMenuRepository } from "./repositories/admin-menu.repository.ts";
+import { AdminMenuService } from "./services/admin-menu.service.ts";
 import type { Env } from "./env.ts";
 import { D1HealthRepository } from "./repositories/health.repository.ts";
 import { LogRepository } from "./repositories/log.repository.ts";
@@ -112,6 +114,8 @@ export interface Services {
   email: EmailService;
   /** PayPal Checkout (migration 0023). */
   paypal: PaypalService;
+  /** Administration → Menu: sidebar items hidden for everyone (migration 0024). */
+  adminMenu: AdminMenuService;
 }
 
 export interface ServiceOptions {
@@ -235,6 +239,7 @@ export function createServices(env: Env, options: ServiceOptions): Services {
     site,
     health,
     monitoring: new MonitoringService(new MonitoringRepository(db), health, authorization, clock, env),
+    adminMenu: new AdminMenuService(db, new AdminMenuRepository(db), authorization, log, clock),
     sessions,
     authorization,
     auth: new AuthService(db, users, resets, sessions, links, delivery, log, clock),

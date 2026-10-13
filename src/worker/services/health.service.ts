@@ -5,11 +5,11 @@ import type { HealthRepository } from "../repositories/health.repository.ts";
  * The newest migration this code expects (Phase 16). A test keeps it equal to the last file in
  * migrations/, so a deploy whose migrations were not applied shows up as `schema: "outdated"`.
  */
-export const LATEST_MIGRATION = "0023_payment_channels_email.sql";
+export const LATEST_MIGRATION = "0024_admin_menu.sql";
 /**
  * Schema probe where D1's migration list cannot be read: what the newest migrations created or changed
  * (0020 error_events, 0021 booking_tarps, 0022 the rewritten bookings CHECK, 0023 payment settings and
- * the e-mail outbox). All must be there.
+ * the e-mail outbox, 0024 the admin menu). All must be there.
  */
 const LATEST_PROBES: { table: string; contains?: string }[] = [
   { table: "error_events" },
@@ -17,6 +17,7 @@ const LATEST_PROBES: { table: string; contains?: string }[] = [
   { table: "bookings", contains: "substr(booking_code, 1, 3)" },
   { table: "payment_settings" },
   { table: "email_logs" },
+  { table: "admin_menu_hidden" },
 ];
 /** The cron runs every minute; 5 minutes without a finished run means it stopped. */
 export const CRON_STALE_MS = 5 * 60_000;
