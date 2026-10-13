@@ -25,6 +25,7 @@
 | `0021_camping_tarp.sql` | camping add-on "tarp area": `camping_settings.tarp_enabled / tarp_price_per_night_satang / max_tarps_per_night` (ADD COLUMN with defaults: off, 0, 0), `camping_tarp_night_inventory` (nightly counter, CHECK no overselling), `booking_tarps` (per-booking price snapshot, money fields frozen); triggers: tarp only with own-tent camping and only while offered — additive only, no data change |
 | `0022_d1_glob_limits.sql` | **table rebuild (announced)**: `bookings`, `home_slides`, `booking_cta_settings` re-created with the same columns, indexes and triggers; only three CHECKs rewritten (booking code, `#RRGGBB` colours) because D1 refuses LIKE/GLOB patterns over 50 bytes ("pattern too complex" — every booking insert failed). Production: all three tables were empty; rollback = D1 Time Travel |
 | `0023_payment_channels_email.sql` | payment step: `payment_settings` (Auto / Manual slip approval, channels PromptPay / bank / QR / PayPal — seeded row), `payments.channel` (ADD COLUMN, nullable, frozen by trigger), `paypal_orders` (PayPal Checkout: claim → capture → settle; money fields frozen, CAPTURED final), `line_recipients.notify_booking` (ADD COLUMN, default on), e-mail: `email_settings` (seeded, off), `email_recipients`, `email_logs` (outbox, SENT final) — additive only, no data change |
+| `0024_admin_menu.sql` | Administration → Menu: `admin_menu_hidden` (sidebar items hidden for everyone; empty = all shown) and the permission `settings.admin_menu` for SUPER_ADMIN — additive only |
 
 ## Commands
 
