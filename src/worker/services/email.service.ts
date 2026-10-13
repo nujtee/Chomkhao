@@ -9,7 +9,7 @@ import { ConflictError, NotFoundError, TooManyRequestsError } from "../http/erro
 import { emailTexts, fillText, renderEmail, type RenderedEmail } from "../email/email-templates.ts";
 import type { EmailSender } from "../email/sender.ts";
 import {
-  guestCancelledText, guestConfirmedText, guestPaymentRejectedText, LineFormatter, newBookingText, paymentConfirmedText, paymentReviewText,
+  guestCancelledText, guestConfirmedText, guestPaymentRejectedText, LineFormatter, balanceReceivedText, guestBalanceRejectedText, stillDue, newBookingText, paymentConfirmedText, paymentReviewText,
   type MsgBooking,
 } from "../line/line-templates.ts";
 import type { EmailFlag, EmailLogListRow, EmailLogRow, EmailRecipientRow, EmailRepository, EmailSettingsRow } from "../repositories/email.repository.ts";
@@ -60,6 +60,10 @@ export class EmailOutbox implements OutboxLike {
 
   async paymentRejected(paymentId: string, bookingId: string, now: string): Promise<D1PreparedStatementLike[]> {
     return (await this.on()) ? [this.repo.paymentRejectedStatement(paymentId, bookingId, now)] : [];
+  }
+
+  async balancePaid(paymentId: string, bookingId: string, now: string): Promise<D1PreparedStatementLike[]> {
+    return (await this.on()) ? [this.repo.balancePaidStatement(paymentId, bookingId, now)] : [];
   }
 
   async bookingCancelled(bookingId: string, _wasConfirmed: boolean, now: string): Promise<D1PreparedStatementLike[]> {
@@ -397,6 +401,13 @@ export class EmailService {
       }
       case "PAYMENT_CONFIRMED": {
         if (!b) return { skip: "NOT_RELEVANT" };
+        if (typeof payload.paymentId === "string") {
+          // Deposit plan: the rest came in.
+          const pay = await this.lineRepo.payment(payload.paymentId);
+          if (!pay || (pay.status !== "VERIFIED" && pay.status !== "PAID")) return { skip: "NOT_RELEVANT" };
+          return fromLine("PAYMENT_CONFIRMED", balanceReceivedText(f, b, pay.amount_satang, pay.method, pay.channel),
+            { label: e.openAdmin, url: this.link(lang, (l) => `/${l.path}/admin/bookings/${b.code}`) });
+        }
         const paid = await this.lineRepo.latestPaidMethod(row.booking_id!);
         return fromLine("PAYMENT_CONFIRMED", paymentConfirmedText(f, b, paid?.method ?? null, paid?.channel ?? null),
           { label: e.openAdmin, url: this.link(lang, (l) => `/${l.path}/admin/bookings/${b.code}`) });
@@ -421,7 +432,14 @@ export class EmailService {
         return fromLine("GUEST_CONFIRMED", guestConfirmedText(f, b, { siteName: null, link: null }), { label: e.viewBooking, url: lookup(b.code) });
       case "GUEST_PAYMENT_REJECTED": {
         const pay = typeof payload.paymentId === "string" ? await this.lineRepo.payment(payload.paymentId) : null;
-        if (!b || !pay || pay.status !== "REJECTED" || b.bookingStatus !== "PENDING") return { skip: "NOT_RELEVANT" };
+        if (!b || !pay || pay.status !== "REJECTED") return { skip: "NOT_RELEVANT" };
+        // The rest of a deposit: the booking stays confirmed; another slip or the reception desk will do.
+        if (pay.is_balance === 1) {
+          if (b.bookingStatus !== "CONFIRMED" || stillDue(b) === 0) return { skip: "NOT_RELEVANT" };
+          return fromLine("GUEST_PAYMENT_REJECTED", guestBalanceRejectedText(f, b, { reason: pay.rejected_reason, link: null, siteName: null }),
+            { label: e.viewBooking, url: lookup(b.code) });
+        }
+        if (b.bookingStatus !== "PENDING") return { skip: "NOT_RELEVANT" };
         return fromLine("GUEST_PAYMENT_REJECTED", guestPaymentRejectedText(f, b, { reason: pay.rejected_reason, link: null, siteName: null }),
           { label: e.payNow, url: lookup(b.code) });
       }

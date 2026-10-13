@@ -77,7 +77,9 @@ export class DashboardRepository {
            (SELECT COUNT(*) FROM bookings WHERE date(created_at, ?3) >= ?2) AS created_month,
            (SELECT COUNT(*) FROM bookings WHERE booking_status = 'PENDING' AND payment_status IN ('UNPAID', 'REJECTED')) AS pending_payment,
            (SELECT COALESCE(SUM(total_satang), 0) FROM bookings WHERE booking_status = 'PENDING' AND payment_status IN ('UNPAID', 'REJECTED')) AS pending_satang,
-           (SELECT COUNT(*) FROM bookings WHERE booking_status = 'PENDING' AND payment_status = 'PENDING_VERIFICATION') AS slips`,
+           (SELECT COUNT(*) FROM payments p JOIN bookings b ON b.id = p.booking_id
+             WHERE p.status = 'PENDING_VERIFICATION' AND (p.slip_asset_id IS NOT NULL OR p.channel = 'PAYPAL')
+               AND b.booking_status IN ('PENDING', 'CONFIRMED')) AS slips`,
       )
       .bind(today, monthStart, offset)
       .first<{
@@ -85,6 +87,24 @@ export class DashboardRepository {
         pending_payment: number; pending_satang: number; slips: number;
       }>();
     return row!;
+  }
+
+  /**
+   * Deposit plan: confirmed bookings that still owe the rest (to take at check-in, or transferred before), with the
+   * amount. Before migration 0025 nothing can be owed.
+   */
+  async balanceDue(): Promise<{ bookings: number; satang: number }> {
+    return withFallback(async () => {
+      const row = await this.db
+        .prepare(
+          `SELECT COUNT(*) AS bookings, COALESCE(SUM(due), 0) AS satang
+             FROM (SELECT b.total_satang - ${PAID_SQL} AS due FROM bookings b
+                    WHERE b.booking_status = 'CONFIRMED' AND b.deposit_satang IS NOT NULL)
+            WHERE due > 0`,
+        )
+        .first<{ bookings: number; satang: number }>();
+      return row ?? { bookings: 0, satang: 0 };
+    }, async () => ({ bookings: 0, satang: 0 }));
   }
 
   async inventoryTonight(today: string) {

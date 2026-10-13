@@ -94,6 +94,8 @@ export interface SlipPaymentRow {
   slip_key: string | null;
   slip_mime: string | null;
   slip_sha256: string | null;
+  /** 1 = sent after the booking was confirmed: the rest of a deposit, not the payment that confirms it. */
+  is_balance: number;
 }
 
 export interface VerificationRow {
@@ -117,10 +119,19 @@ const SLIP_PAYMENT_SELECT = `
   SELECT p.id, p.booking_id, b.booking_code, b.booking_status, b.payment_status AS booking_payment_status,
          b.created_at AS booking_created_at, b.total_satang, b.customer_name, b.check_in, b.check_out,
          p.amount_satang, p.status, p.channel, p.reference, p.rejected_reason, p.submitted_at,
-         m.object_key AS slip_key, m.mime_type AS slip_mime, p.slip_sha256
+         m.object_key AS slip_key, m.mime_type AS slip_mime, p.slip_sha256,
+         CASE WHEN b.confirmed_at IS NOT NULL AND p.submitted_at > b.confirmed_at THEN 1 ELSE 0 END AS is_balance
     FROM payments p
     JOIN bookings b ON b.id = p.booking_id
     LEFT JOIN media_assets m ON m.id = p.slip_asset_id AND m.bucket = 'PRIVATE' AND m.purpose = 'PAYMENT_SLIP'`;
+
+/**
+ * Booking ?2 is a confirmed deposit booking that still owes exactly ?3, with no payment waiting for review:
+ * the rest can be taken once — at reception or from the guest's own transfer, never both.
+ */
+const BALANCE_OPEN = `EXISTS (SELECT 1 FROM bookings b WHERE b.id = ?2 AND b.booking_status = 'CONFIRMED' AND b.deposit_satang IS NOT NULL
+    AND b.total_satang - (SELECT COALESCE(SUM(q.amount_satang), 0) FROM payments q WHERE q.booking_id = b.id AND q.status IN ('VERIFIED', 'PAID')) = ?3
+    AND NOT EXISTS (SELECT 1 FROM payments w WHERE w.booking_id = b.id AND w.status = 'PENDING_VERIFICATION'))`;
 
 const ACCOUNT_SELECT = `
   SELECT a.id, a.bank_name, a.account_name, a.account_number, a.promptpay_number, a.qr_asset_id,
@@ -297,7 +308,8 @@ export class PaymentRepository {
 
   /**
    * The rest of a deposit booking, taken at reception (staff confirm the cash / transfer). Inserted only while the
-   * booking is confirmed and still owes exactly this amount, so a double click or two desks cannot take it twice.
+   * booking is confirmed, still owes exactly this amount and no transfer slip for it waits for review, so a double
+   * click, two desks or a guest's own transfer cannot take it twice.
    */
   insertBalancePaymentStatement(p: { id: string; bookingId: string; amount: number; method: string; reference: string | null; by: string; now: string }): D1PreparedStatementLike {
     return this.db
@@ -305,9 +317,7 @@ export class PaymentRepository {
         `INSERT INTO payments (id, booking_id, amount_satang, method, status, reference, note, paid_at, submitted_at,
            verified_at, verified_by, updated_at)
          SELECT ?1, ?2, ?3, ?4, 'PAID', ?5, NULL, ?7, ?7, ?7, ?6, ?7
-          WHERE EXISTS (SELECT 1 FROM bookings b WHERE b.id = ?2 AND b.booking_status = 'CONFIRMED'
-                          AND b.total_satang - (SELECT COALESCE(SUM(q.amount_satang), 0) FROM payments q
-                                                 WHERE q.booking_id = b.id AND q.status IN ('VERIFIED', 'PAID')) = ?3)
+          WHERE ${BALANCE_OPEN}
          RETURNING id`,
       )
       .bind(p.id, p.bookingId, p.amount, p.method, p.reference, p.by, p.now);
@@ -393,6 +403,33 @@ export class PaymentRepository {
         `INSERT INTO payments (id, booking_id, amount_satang, method, channel, status, slip_asset_id, slip_sha256, submitted_at, updated_at)
          SELECT ?1, ?2, ?3, CASE ?7 WHEN 'PROMPTPAY' THEN 'PROMPTPAY' ELSE 'BANK_TRANSFER' END, ?7, 'PENDING_VERIFICATION', ?4, ?5, ?6, ?6
           WHERE EXISTS (SELECT 1 FROM bookings WHERE id = ?2 AND payment_status = 'PENDING_VERIFICATION' AND updated_at = ?6)`,
+      )
+      .bind(p.id, p.bookingId, p.amount, p.assetId, p.sha256, p.now, p.channel);
+  }
+
+  /**
+   * The guest transferred the rest of a deposit before the stay (slip). Same guard as the reception payment
+   * (BALANCE_OPEN): the slip asset and its payment are only stored while exactly `amount` is still due and no
+   * other payment waits for review. The booking itself does not change (it stays CONFIRMED).
+   */
+  insertBalanceSlipAssetStatement(a: { id: string; bookingId: string; amount: number; key: string; mime: string; size: number; width: number; height: number; sha256: string; now: string }): D1PreparedStatementLike {
+    return this.db
+      .prepare(
+        `INSERT INTO media_assets (id, bucket, object_key, purpose, mime_type, size_bytes, width, height, sha256, created_at)
+         SELECT ?1, 'PRIVATE', ?4, 'PAYMENT_SLIP', ?5, ?6, ?7, ?8, ?9, ?10
+          WHERE ${BALANCE_OPEN}`,
+      )
+      .bind(a.id, a.bookingId, a.amount, a.key, a.mime, a.size, a.width, a.height, a.sha256, a.now);
+  }
+
+  /** RETURNING says whether the slip for the rest was taken (see insertBalanceSlipAssetStatement). */
+  insertBalanceSlipPaymentStatement(p: { id: string; bookingId: string; amount: number; assetId: string; sha256: string; channel: string; now: string }): D1PreparedStatementLike {
+    return this.db
+      .prepare(
+        `INSERT INTO payments (id, booking_id, amount_satang, method, channel, status, slip_asset_id, slip_sha256, submitted_at, updated_at)
+         SELECT ?1, ?2, ?3, CASE ?7 WHEN 'PROMPTPAY' THEN 'PROMPTPAY' ELSE 'BANK_TRANSFER' END, ?7, 'PENDING_VERIFICATION', ?4, ?5, ?6, ?6
+          WHERE ${BALANCE_OPEN}
+         RETURNING id`,
       )
       .bind(p.id, p.bookingId, p.amount, p.assetId, p.sha256, p.now, p.channel);
   }

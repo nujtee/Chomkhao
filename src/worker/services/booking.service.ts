@@ -10,7 +10,7 @@ import type {
 } from "../../shared/booking-types.ts";
 import { BOOKING_CODE_PATTERN, maskPhone, normalizePhone, type BookingMoveOptionsDto, type MoveDayState } from "../../shared/booking-types.ts";
 import type { BookingSettingsDto, StayAction } from "../../shared/dashboard-types.ts";
-import type { BalanceDueDto, BalanceMethod } from "../../shared/payment-types.ts";
+import type { BalanceDueDto, BalanceMethod, PaymentInstructionsDto } from "../../shared/payment-types.ts";
 import { balanceDue } from "../../shared/booking-rules.ts";
 import { dueOnline, paidOf } from "./booking-money.ts";
 import { addDays, diffDays, stayNights, todayIn } from "../../shared/dates.ts";
@@ -357,7 +357,7 @@ export class BookingService {
 
   async adminList(
     actor: AuthContext,
-    filter: { status?: BookingStatus; payment?: PaymentStatus; from?: string; to?: string; q?: string; before?: string; limit: number },
+    filter: { status?: BookingStatus; payment?: PaymentStatus; from?: string; to?: string; q?: string; before?: string; limit: number; due?: boolean },
     meta: RequestMeta,
   ): Promise<{ items: AdminBookingSummaryDto[]; nextCursor: string | null }> {
     await this.authz.requirePermission(actor, "bookings.view", meta);
@@ -478,6 +478,7 @@ export class BookingService {
     const [payments, primary, snapshot] = await Promise.all([this.payments.payments(row.id), this.payments.primaryAccount(), this.payments.snapshot(row.id)]);
     const paidSatang = paidOf(payments);
     const balanceSatang = balanceDue(row.total_satang, paidSatang);
+    const waiting = payments.find((p) => p.status === "PENDING_VERIFICATION");
     // Money taken today goes to today's primary account; the one copied at booking time if there is none.
     const account = primary ? {
       bankName: primary.bank_name, accountName: primary.account_name, accountNumber: primary.account_number,
@@ -489,6 +490,7 @@ export class BookingService {
     return {
       bookingCode: row.booking_code, totalSatang: row.total_satang, paidSatang, balanceSatang, account,
       promptpayPayload: account?.promptpayNumber && balanceSatang > 0 ? promptpayPayload(account.promptpayNumber, balanceSatang) : null,
+      pendingSlip: waiting ? { paymentId: waiting.id, amountSatang: waiting.amount_satang, submittedAt: waiting.submitted_at } : null,
     };
   }
 
@@ -507,9 +509,14 @@ export class BookingService {
     if (input.checkIn) await this.authz.requirePermission(actor, "bookings.edit", meta);
     const row = await this.expireIfDue(await this.findOr404(code));
     if (row.booking_status !== "CONFIRMED") throw new ConflictError("Only a confirmed booking can be paid at reception", "BOOKING_STATUS_INVALID");
-    const paidBefore = paidOf(await this.payments.payments(row.id));
+    const payments = await this.payments.payments(row.id);
+    const paidBefore = paidOf(payments);
     const amount = balanceDue(row.total_satang, paidBefore);
     if (amount === 0) throw new ConflictError("Nothing is due on this booking", "NOTHING_DUE");
+    // The guest already transferred the rest (slip waiting): verify or reject that first, never take it twice.
+    if (payments.some((p) => p.status === "PENDING_VERIFICATION")) {
+      throw new ConflictError("A transfer slip for this booking waits for review", "BALANCE_SLIP_PENDING");
+    }
     if (input.checkIn) {
       const gate = stayActions(row.booking_status, row.check_in, row.check_out, todayIn(await this.quotes.timezone(), this.clock())).checkIn;
       if (gate === "NOT_YET") throw new ConflictError("The stay has not started yet", "STAY_NOT_STARTED");
@@ -521,6 +528,8 @@ export class BookingService {
       this.payments.insertBalancePaymentStatement({ id: paymentId, bookingId: row.id, amount, method: input.method, reference: input.reference, by: actor.userId, now }),
       // Sees the payment above (same transaction); does nothing if the booking moved on meanwhile.
       ...(input.checkIn ? [this.repo.transitionStatement(row.id, "CONFIRMED", "CHECKED_IN", now)] : []),
+      // Staff who want payment news hear that the rest came in (only if the payment above was inserted).
+      ...(this.outbox?.balancePaid ? await this.outbox.balancePaid(paymentId, row.id, now) : []),
     ]);
     if (!results[0]?.results.length) throw new ConflictError("The booking changed meanwhile, please reload", "BOOKING_CHANGED");
     await this.db.batch([
@@ -698,8 +707,10 @@ export class BookingService {
   // ================================================================ DTOs (from snapshots, never from current prices)
 
   private async toPublic(row: BookingRow): Promise<PublicBookingDto> {
-    // Payment details only while the booking is still waiting for money.
+    // Payment details only while the booking is still waiting for money…
     const awaitingPayment = row.booking_status === "PENDING" && (row.payment_status === "UNPAID" || row.payment_status === "REJECTED");
+    // …or, on a deposit plan, while the confirmed booking still owes the rest (the guest may transfer it before the stay).
+    const owing = row.booking_status === "CONFIRMED" && row.deposit_satang !== null;
     const [items, included, food, snapshot, lineUpdates, tarp, paySettings, payments] = await Promise.all([
       this.repo.items(row.id),
       this.repo.includedMeals(row.id),
@@ -707,13 +718,31 @@ export class BookingService {
       this.payments.snapshot(row.id),
       this.lineStatus ? this.lineStatus(row) : Promise.resolve({ available: false, linked: false }),
       this.repo.tarp(row.id),
-      awaitingPayment ? this.payments.settings() : Promise.resolve(null),
+      awaitingPayment || owing ? this.payments.settings() : Promise.resolve(null),
       this.payments.payments(row.id),
     ]);
     const rejected = payments.filter((p) => p.status === "REJECTED").at(-1);
     const paidSatang = paidOf(payments);
+    const balanceSatang = balanceDue(row.total_satang, paidSatang);
     // Asked online: the deposit on a deposit plan, else the whole total.
     const dueNow = dueOnline(row);
+    // Always the account copied onto the booking: the slip check compares the receiver with it.
+    const instructions = (amount: number, paypal: boolean): PaymentInstructionsDto | null => snapshot && paySettings ? {
+      bankName: snapshot.bank_name_snapshot,
+      accountName: snapshot.account_name_snapshot,
+      accountNumber: snapshot.account_number_snapshot,
+      promptpayNumber: snapshot.promptpay_number_snapshot,
+      qrUrl: publicMediaUrl(snapshot.payment_qr_snapshot, this.mediaBaseUrl),
+      amountDueSatang: amount,
+      channels: availableChannels(paySettings, {
+        promptpay: snapshot.promptpay_number_snapshot, accountNumber: snapshot.account_number_snapshot, qr: snapshot.payment_qr_snapshot,
+      }, paypal),
+      promptpayPayload: snapshot.promptpay_number_snapshot && amount > 0 ? promptpayPayload(snapshot.promptpay_number_snapshot, amount) : null,
+    } : null;
+    // Payments sent after the booking was confirmed: the rest of the deposit.
+    const later = row.confirmed_at ? payments.filter((p) => p.submitted_at > row.confirmed_at!) : [];
+    const reviewing = payments.some((p) => p.status === "PENDING_VERIFICATION");
+    const lastLater = later.at(-1);
     const item = items[0]!;
     return {
       bookingCode: row.booking_code,
@@ -724,17 +753,12 @@ export class BookingService {
       expiresAt: row.booking_status === "PENDING" ? row.expires_at : null,
       createdAt: row.created_at,
       lineUpdates,
-      paymentInstructions: awaitingPayment && snapshot && paySettings ? {
-        bankName: snapshot.bank_name_snapshot,
-        accountName: snapshot.account_name_snapshot,
-        accountNumber: snapshot.account_number_snapshot,
-        promptpayNumber: snapshot.promptpay_number_snapshot,
-        qrUrl: publicMediaUrl(snapshot.payment_qr_snapshot, this.mediaBaseUrl),
-        amountDueSatang: dueNow,
-        channels: availableChannels(paySettings, {
-          promptpay: snapshot.promptpay_number_snapshot, accountNumber: snapshot.account_number_snapshot, qr: snapshot.payment_qr_snapshot,
-        }, this.paypalReady),
-        promptpayPayload: snapshot.promptpay_number_snapshot && dueNow > 0 ? promptpayPayload(snapshot.promptpay_number_snapshot, dueNow) : null,
+      paymentInstructions: awaitingPayment ? instructions(dueNow, this.paypalReady) : null,
+      // The rest by transfer + slip only (no PayPal): staff or the verification service check it like the deposit.
+      balancePayment: owing && balanceSatang > 0 && snapshot && paySettings ? {
+        instructions: reviewing ? null : instructions(balanceSatang, false),
+        reviewing,
+        rejectedReason: !reviewing && lastLater?.status === "REJECTED" ? lastLater.rejected_reason ?? "" : null,
       } : null,
       paymentRejectedReason: rejected?.rejected_reason ?? null,
       cancelReason: row.booking_status === "CANCELLED" ? row.cancel_reason : null,
@@ -779,7 +803,7 @@ export class BookingService {
       currency: row.currency,
       depositSatang: row.deposit_satang,
       paidSatang,
-      balanceSatang: balanceDue(row.total_satang, paidSatang),
+      balanceSatang,
     };
   }
 

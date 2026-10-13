@@ -46,9 +46,11 @@ function Check({ v }: { v: SlipVerificationDto }) {
  * Decline a payment: the reason goes to the guest (booking page, LINE, e-mail). The guest either pays
  * again (the booking stays held) or the booking is cancelled and its nights / tents / food released.
  */
-export function DeclineDialog({ open, code, canCancel, busy, onClose, onSubmit }: {
+export function DeclineDialog({ open, code, canCancel, busy, onClose, onSubmit, balance = false }: {
   open: boolean; code: string; canCancel: boolean; busy: boolean; onClose: () => void;
   onSubmit: (reason: string, cancelBooking: boolean) => void;
+  /** The rest of a deposit: the booking is confirmed and stays so (no "pay again" hold, no cancelling from here). */
+  balance?: boolean;
 }) {
   const { t } = useAdmin();
   const id = useId();
@@ -72,18 +74,20 @@ export function DeclineDialog({ open, code, canCancel, busy, onClose, onSubmit }
             onChange={(e) => setReason(e.currentTarget.value)} />
           <p id={`${id}-hint`} className="adm-field__hint">{t.slip.reasonHint}</p>
         </div>
-        <fieldset className="adm-fieldset slip-decline__choice">
-          <label className="adm-check">
-            <input type="radio" name={`${id}-what`} checked={!cancelBooking || !canCancel} onChange={() => setCancelBooking(false)} />
-            <span>{t.slip.payAgain}</span>
-          </label>
-          {canCancel && (
+        {balance ? <p className="adm-field__hint">{t.slip.balanceKeep}</p> : (
+          <fieldset className="adm-fieldset slip-decline__choice">
             <label className="adm-check">
-              <input type="radio" name={`${id}-what`} checked={cancelBooking} onChange={() => setCancelBooking(true)} />
-              <span>{t.slip.cancelBooking}</span>
+              <input type="radio" name={`${id}-what`} checked={!cancelBooking || !canCancel} onChange={() => setCancelBooking(false)} />
+              <span>{t.slip.payAgain}</span>
             </label>
-          )}
-        </fieldset>
+            {canCancel && (
+              <label className="adm-check">
+                <input type="radio" name={`${id}-what`} checked={cancelBooking} onChange={() => setCancelBooking(true)} />
+                <span>{t.slip.cancelBooking}</span>
+              </label>
+            )}
+          </fieldset>
+        )}
         <div className="adm-row adm-row--wrap adm-dialog__actions">
           <Button type="submit" variant="danger" busy={busy} disabled={!ok}>{canCancel && cancelBooking ? t.slip.cancelBooking : t.slip.reject}</Button>
           <Button variant="ghost" onClick={onClose}>{t.common.close}</Button>
@@ -111,7 +115,7 @@ function SlipCard({ item, approvalMode, onChanged }: { item: SlipQueueItemDto; a
     setError(null);
     try {
       await apiRequest("POST", `/api/admin/payments/${encodeURIComponent(item.paymentId)}/verify`, ref.trim() ? { transactionRef: ref.trim() } : {});
-      onChanged(t.slip.verifiedDone);
+      onChanged(item.balance ? t.slip.verifiedBalanceDone : t.slip.verifiedDone);
     } catch (err) {
       setError(detailMessage(t, err));
     } finally {
@@ -150,9 +154,11 @@ function SlipCard({ item, approvalMode, onChanged }: { item: SlipQueueItemDto; a
         <h2 className="adm-h2"><Link to={href("bookings", item.bookingCode)} className="adm-mono">{item.bookingCode}</Link></h2>
         <p className="adm-small">{item.customerName} · {stayDate(item.checkIn)} → {stayDate(item.checkOut)}</p>
         <p>
-          {/* What this slip must show: the deposit on a deposit plan (the rest is taken at check-in), else the total. */}
+          {/* What this slip must show: the deposit on a deposit plan, the rest when sent after confirmation, else the total. */}
           {t.slip.total}: <strong>{formatBaht(item.amountSatang, locale.code)}</strong>
-          {item.amountSatang < item.totalSatang && <span className="adm-muted adm-small"> ({t.pay.kindDeposit} · {t.bk.total} {formatBaht(item.totalSatang, locale.code)})</span>}
+          {item.amountSatang < item.totalSatang && (
+            <span className="adm-muted adm-small"> ({item.balance ? t.pay.kindBalance : t.pay.kindDeposit} · {t.bk.total} {formatBaht(item.totalSatang, locale.code)})</span>
+          )}
           {item.channel && <> · <span className="adm-badge adm-badge--muted">{t.pay[`c${item.channel}`]}</span></>}
           {" · "}<span className="adm-muted adm-small">{t.slip.submitted} {dateTime(item.submittedAt)}</span>
         </p>
@@ -176,7 +182,7 @@ function SlipCard({ item, approvalMode, onChanged }: { item: SlipQueueItemDto; a
       </div>
       <ConfirmDialog open={confirm} message={t.slip.verifyConfirm} confirmLabel={t.slip.approve}
         onCancel={() => setConfirm(false)} onConfirm={() => void approve()} />
-      <DeclineDialog open={declining} code={item.bookingCode} canCancel={can("bookings.cancel")} busy={busy}
+      <DeclineDialog open={declining} code={item.bookingCode} canCancel={!item.balance && can("bookings.cancel")} busy={busy} balance={item.balance}
         onClose={() => setDeclining(false)} onSubmit={(r, c) => void decline(r, c)} />
     </article>
   );

@@ -47,6 +47,8 @@ export interface DashboardDto {
     bookingsCreatedMonth: number;
     pendingPayment: number;
     slipsToReview: number;
+    /** Deposit plan: confirmed bookings that still owe the rest (taken at check-in or transferred before). */
+    balanceDue: number;
   };
   /** Tonight's inventory. */
   inventory: {
@@ -63,6 +65,8 @@ export interface DashboardDto {
    */
   money: {
     pendingPaymentSatang: number;
+    /** Deposit plan: the rest still to receive from confirmed bookings (sum of total − paid). */
+    balanceDueSatang: number;
     today: RevenueDto;
     month: RevenueDto;
     trend: { date: string; bookings: number; revenueSatang: number }[];

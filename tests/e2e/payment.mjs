@@ -353,6 +353,74 @@ await check("deposit: House 02 takes 50%; the guest is asked for the deposit; ch
   await req.patch(`${BASE}/api/admin/accommodations/dev_house_02`, { headers: H, data: { paymentMode: "FULL" } });
 });
 
+await check("deposit: the dashboard totals what is still due at check-in; the guest transfers the rest ahead from the booking page; staff approve it", async () => {
+  await req.patch(`${BASE}/api/admin/accommodations/dev_house_02`, { headers: H, data: { paymentMode: "DEPOSIT_50" } });
+  const R = await book({ checkIn: day(40), checkOut: day(42), stay: { kind: "UNIT", unitId: "dev_house_02" } }, "0866666666");
+  const baht = (s) => `฿${(s / 100).toLocaleString("en-US")}`;
+  const later = R.totalSatang - R.depositSatang;
+  const rec = await req.post(`${BASE}/api/admin/bookings/${R.bookingCode}/payments`, {
+    headers: H, data: { amountSatang: R.depositSatang, method: "BANK_TRANSFER", paidAt: new Date().toISOString() },
+  });
+  assert(rec.ok(), await rec.text());
+
+  // Dashboard: the total still to take at check-in, linking to those bookings.
+  await pa.goto(`${BASE}/en/admin`);
+  const kpi = pa.locator(".adm-kpi", { hasText: "Still due at check-in" });
+  await kpi.getByText(baht(later)).waitFor();
+  await kpi.getByText("Deposit bookings still owing: 1").waitFor();
+  await kpi.screenshot({ path: `${SHOTS}/balance-dashboard-kpi.png` });
+  await kpi.getByRole("link").click();
+  await pa.waitForURL(/\/en\/admin\/bookings\?due=1$/);
+  assert(await pa.getByLabel("Only those still owing at check-in").isChecked(), "filter not on");
+  await pa.locator(".adm-table tbody tr").filter({ hasText: R.bookingCode }).getByText(`${baht(later)} due`).waitFor();
+  assert((await pa.locator(".adm-table tbody tr").count()) === 1, "only bookings that still owe");
+
+  // Guest: the rest, by PromptPay QR (no PayPal here), then the slip.
+  await pg.goto(`${BASE}/th/booking/lookup?code=${R.bookingCode}`);
+  await pg.locator("#lk-phone").fill("0866666666");
+  await pg.locator("form button[type=submit]").click();
+  const pay = pg.locator(".pay", { has: pg.getByRole("heading", { name: "ชำระส่วนที่เหลือก่อนเข้าพัก" }) });
+  await pay.locator(".pay__amount", { hasText: "ยอดคงเหลือ" }).getByText(baht(later)).waitFor();
+  await pay.getByText(`ได้รับมัดจำแล้ว ${baht(R.depositSatang)}`, { exact: false }).waitFor();
+  assert(!(await pay.getByRole("radio", { name: /PayPal/ }).count()), "PayPal offered for the rest");
+  const qr = pay.locator("svg.qr");
+  await qr.waitFor();
+  assert((await qr.getAttribute("aria-label")).includes(baht(later)), "QR for the rest");
+  const overflow = await pg.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  assert(overflow <= 1, `horizontal scroll ${overflow}px`);
+  await pg.screenshot({ path: `${SHOTS}/balance-guest-pay.png`, fullPage: true });
+  await pay.locator(".slip input[type=file]").setInputFiles(`${FIXTURES}/story.png`);
+  await pay.getByRole("button", { name: "ส่งสลิป" }).click();
+  await pg.getByText("ได้รับสลิปยอดคงเหลือแล้ว กำลังตรวจสอบ", { exact: false }).waitFor();
+  await pg.getByText("ชำระส่วนที่เหลือก่อนเข้าพัก").waitFor({ state: "detached" });
+
+  // Staff: the booking page shows the slip for the rest; approve it.
+  await pa.goto(`${BASE}/en/admin/bookings/${R.bookingCode}`);
+  const review = pa.getByRole("group", { name: "Balance slip waiting for review" });
+  await review.locator("img").waitFor();
+  await review.getByText(baht(later)).waitFor();
+  await pa.locator("tr", { hasText: "Slip pending" }).locator(".adm-deposit__kind", { hasText: "Balance" }).waitFor();
+  await pa.screenshot({ path: `${SHOTS}/balance-admin-review.png`, fullPage: true });
+  await review.getByRole("button", { name: "Decline / cancel" }).click();
+  const decline = pa.locator("dialog.slip-decline");
+  await decline.getByText("The booking stays confirmed — the guest can send a new slip or pay the rest at check-in.").waitFor();
+  assert(!(await decline.getByLabel(/Cancel this booking/).count()), "cancel offered for a balance slip");
+  await decline.getByRole("button", { name: "Close" }).click();
+  await review.getByRole("button", { name: "Approve" }).click();
+  await pa.locator("dialog[open]").getByRole("button", { name: "Approve" }).click();
+  await pa.getByText("Approved — the balance is recorded and the booking is paid in full.").waitFor();
+  await pa.locator(".adm-deposit").getByText("Paid in full").waitFor();
+  const after = (await (await req.get(`${BASE}/api/admin/bookings/${R.bookingCode}`)).json()).data;
+  assert(after.status === "CONFIRMED" && after.balanceSatang === 0, JSON.stringify([after.status, after.balanceSatang]));
+
+  await pg.reload();
+  await pg.locator("#lk-phone").fill("0866666666");
+  await pg.locator("form button[type=submit]").click();
+  await pg.getByText("ชำระครบแล้ว — เช็กอินได้เลยโดยไม่ต้องชำระเพิ่ม").waitFor();
+
+  await req.patch(`${BASE}/api/admin/accommodations/dev_house_02`, { headers: H, data: { paymentMode: "FULL" } });
+});
+
 console.log("console errors:", consoleErrors.length, consoleErrors.slice(0, 5));
 await check("no CSP violations or page errors", async () => {
   const bad = consoleErrors.filter((e) => /Content Security Policy|Refused to|pageerror/i.test(e));

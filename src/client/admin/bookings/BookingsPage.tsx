@@ -21,11 +21,14 @@ export function BookingsPage() {
     const p = typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("payment");
     return p && ["UNPAID", "PENDING_VERIFICATION", "VERIFIED", "PAID", "REJECTED", "REFUNDED"].includes(p) ? p : "";
   })();
+  // …or ?due=1: confirmed deposit bookings that still owe the rest (dashboard "still due at check-in").
+  const initialDue = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("due") === "1";
   const [payment, setPayment] = useState<string>(initialPayment);
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [q, setQ] = useState("");
-  const [filters, setFilters] = useState({ status: "", payment: initialPayment, from: "", to: "", q: "" });
+  const [due, setDue] = useState(initialDue);
+  const [filters, setFilters] = useState({ status: "", payment: initialPayment, from: "", to: "", q: "", due: initialDue ? "1" : "" });
 
   const buildUrl = useCallback((before: string | null) => {
     const params = new URLSearchParams({ limit: "30" });
@@ -38,7 +41,7 @@ export function BookingsPage() {
 
   const apply = (e: FormEvent) => {
     e.preventDefault();
-    setFilters({ status, payment, from, to, q: q.trim() });
+    setFilters({ status, payment, from, to, q: q.trim(), due: due ? "1" : "" });
   };
 
   return (
@@ -73,6 +76,10 @@ export function BookingsPage() {
         <label className="adm-filter adm-filter--grow">
           <span>{t.common.search}</span>
           <input type="search" placeholder={t.bk.searchPlaceholder} maxLength={60} value={q} onChange={(e) => setQ(e.target.value)} />
+        </label>
+        <label className="adm-filter adm-filter--toggle">
+          <input type="checkbox" checked={due} onChange={(e) => setDue(e.currentTarget.checked)} />
+          <span>{t.bk.dueOnly}</span>
         </label>
         <Button type="submit" variant="secondary">{t.common.search}</Button>
       </form>

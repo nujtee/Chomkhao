@@ -4,7 +4,7 @@ import { bookingLookupPath } from "../../shared/routes.ts";
 import type { D1DatabaseLike, D1PreparedStatementLike } from "../env.ts";
 import { createLineApi, packMessages, retryKeyFor, type FetchLike, type LineApi, type LineTextMessage } from "../line/line-api.ts";
 import {
-  checkinDigestBlocks, foodOrderText, guestCancelledText, guestCheckinText, guestConfirmedText, guestPaymentRejectedText, kitchenDigestBlocks,
+  checkinDigestBlocks, foodOrderText, guestCancelledText, guestCheckinText, guestConfirmedText, guestPaymentRejectedText, kitchenDigestBlocks, balanceReceivedText, guestBalanceRejectedText, stillDue,
   LineFormatter, newBookingText, paymentConfirmedText, paymentReviewText, testText, type KitchenDish,
 } from "../line/line-templates.ts";
 import type { LineRepository, LineSettingsRow, NotificationRow, RecipientFlag } from "../repositories/line.repository.ts";
@@ -72,6 +72,11 @@ export class Outbox {
   /** A slip was turned down → the guest (if linked) hears the reason. */
   async paymentRejected(paymentId: string, bookingId: string, now: string): Promise<D1PreparedStatementLike[]> {
     return (await this.on()) ? [this.repo.guestPaymentRejectedStatement(paymentId, bookingId, now)] : [];
+  }
+
+  /** Deposit plan: the rest came in → staff chats that want payment news. */
+  async balancePaid(paymentId: string, bookingId: string, now: string): Promise<D1PreparedStatementLike[]> {
+    return (await this.on()) ? [this.repo.balancePaidStatement(paymentId, bookingId, now)] : [];
   }
 }
 
@@ -309,6 +314,12 @@ class RenderContext {
       case "PAYMENT_CONFIRMED": {
         const b = await one();
         if (!b) return { skip: "NOT_RELEVANT" };
+        if (typeof p.paymentId === "string") {
+          // Deposit plan: the rest came in.
+          const pay = await this.repo.payment(p.paymentId);
+          if (!pay || (pay.status !== "VERIFIED" && pay.status !== "PAID")) return { skip: "NOT_RELEVANT" };
+          return text(balanceReceivedText(f, b, pay.amount_satang, pay.method, pay.channel));
+        }
         const paid = row.booking_id ? await this.repo.latestPaidMethod(row.booking_id) : null;
         return text(paymentConfirmedText(f, b, paid?.method ?? null, paid?.channel ?? null));
       }
@@ -320,9 +331,13 @@ class RenderContext {
       case "GUEST_PAYMENT_REJECTED": {
         const pay = typeof p.paymentId === "string" ? await this.repo.payment(p.paymentId) : null;
         const b = await one();
+        if (!pay || pay.status !== "REJECTED" || !b) return { skip: "NOT_RELEVANT" };
+        const reply = { reason: pay.rejected_reason, link: this.link(lang, bookingLookupPath), siteName: (await this.site(lang)).name };
+        // The rest of a deposit: the booking stays confirmed; another slip or the reception desk will do.
+        if (pay.is_balance === 1) return b.bookingStatus === "CONFIRMED" && stillDue(b) > 0 ? text(guestBalanceRejectedText(f, b, reply)) : { skip: "NOT_RELEVANT" };
         // Only while the guest can still act on it.
-        if (!pay || pay.status !== "REJECTED" || !b || b.bookingStatus !== "PENDING") return { skip: "NOT_RELEVANT" };
-        return text(guestPaymentRejectedText(f, b, { reason: pay.rejected_reason, link: this.link(lang, bookingLookupPath), siteName: (await this.site(lang)).name }));
+        if (b.bookingStatus !== "PENDING") return { skip: "NOT_RELEVANT" };
+        return text(guestPaymentRejectedText(f, b, reply));
       }
       case "GUEST_CANCELLED": {
         const b = await one();

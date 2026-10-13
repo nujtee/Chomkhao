@@ -175,6 +175,12 @@ export class EmailRepository {
       "EXISTS (SELECT 1 FROM payments p WHERE p.id = ?7 AND p.status = 'PENDING_VERIFICATION')", [paymentId]);
   }
 
+  /** Deposit plan: the rest came in (payment marked in this batch; marker: updated_at = now). One message per payment. */
+  balancePaidStatement(paymentId: string, bookingId: string, now: string): D1PreparedStatementLike {
+    return this.staffOutbox("PAYMENT_CONFIRMED", "notify_payment", `PAYMENT_CONFIRMED:${paymentId}:staff:`, bookingId, { paymentId }, now, now,
+      "EXISTS (SELECT 1 FROM payments p WHERE p.id = ?7 AND p.booking_id = ?3 AND p.status IN ('VERIFIED', 'PAID') AND p.updated_at = ?8)", [paymentId, now]);
+  }
+
   paymentRejectedStatement(paymentId: string, bookingId: string, now: string): D1PreparedStatementLike {
     return this.guestOutbox("GUEST_PAYMENT_REJECTED", `GUEST_PAYMENT_REJECTED:${paymentId}`, bookingId, { paymentId }, now,
       "EXISTS (SELECT 1 FROM payments p WHERE p.id = ?6 AND p.status = 'REJECTED')", [paymentId]);

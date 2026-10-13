@@ -80,6 +80,18 @@ export interface BalanceDueDto {
   account: { bankName: string; accountName: string; accountNumber: string | null; promptpayNumber: string | null; qrUrl: string | null } | null;
   /** PromptPay Thai QR for exactly the balance; null without a PromptPay number. */
   promptpayPayload: string | null;
+  /** The guest already sent a transfer slip for the rest: verify or reject it before taking money here. */
+  pendingSlip: { paymentId: string; amountSatang: number; submittedAt: string } | null;
+}
+
+/** Deposit plan: the guest pays the rest themselves before the stay (transfer + slip). */
+export interface BalancePaymentDto {
+  /** How to pay the rest (from the booking's account snapshot, PayPal not offered); null while a slip is being checked. */
+  instructions: PaymentInstructionsDto | null;
+  /** A slip for the rest is being checked (verification service or staff). */
+  reviewing: boolean;
+  /** Staff turned the last slip for the rest down: their reason ("" = none given); null otherwise. */
+  rejectedReason: string | null;
 }
 
 /** How to pay this booking — from the account snapshot taken when the booking was made. */
@@ -161,6 +173,8 @@ export interface SlipQueueItemDto {
   slipUrl: string | null;
   /** PayPal capture id for a PayPal payment held by PayPal for review. */
   reference: string | null;
+  /** Sent after the booking was confirmed: the rest of a deposit (the booking stays confirmed either way). */
+  balance: boolean;
   rejectedReason: string | null;
   verifications: SlipVerificationDto[];
 }

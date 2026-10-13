@@ -13,7 +13,8 @@ import { addMs, iso, type AuthContext, type Clock, type RequestMeta } from "./au
 import type { AuthorizationService } from "./authorization.service.ts";
 import type { BookingService } from "./booking.service.ts";
 import type { SecurityLogService } from "./security-log.service.ts";
-import { dueOnline } from "./booking-money.ts";
+import { balanceDue } from "../../shared/booking-rules.ts";
+import { dueOnline, paidOf } from "./booking-money.ts";
 import type { OutboxLike } from "./marketing.service.ts";
 
 export const SLIP_LIMITS = {
@@ -69,7 +70,17 @@ export class SlipService {
 
   async submit(code: string, phone: string, file: File, meta: RequestMeta, channel: SlipChannel = "BANK_TRANSFER"): Promise<{ booking: PublicBookingDto } & SlipUploadResultDto> {
     const booking = await this.bookings.guestBooking(code, phone, meta);
-    if (booking.booking_status !== "PENDING" || (booking.payment_status !== "UNPAID" && booking.payment_status !== "REJECTED")) {
+    // Deposit plan: once confirmed, the guest may transfer the rest before the stay (the booking stays CONFIRMED).
+    const forBalance = booking.booking_status === "CONFIRMED" && booking.deposit_satang !== null;
+    let amount = dueOnline(booking);
+    if (forBalance) {
+      const payments = await this.repo.payments(booking.id);
+      if (payments.some((p) => p.status === "PENDING_VERIFICATION")) {
+        throw new ConflictError("A payment for this booking is already being checked", "SLIP_PENDING");
+      }
+      amount = balanceDue(booking.total_satang, paidOf(payments));
+      if (amount === 0) throw new ConflictError("Nothing is due on this booking", "NOTHING_DUE");
+    } else if (booking.booking_status !== "PENDING" || (booking.payment_status !== "UNPAID" && booking.payment_status !== "REJECTED")) {
       throw new ConflictError("This booking is not waiting for a payment slip", "SLIP_NOT_ACCEPTED");
     }
 
@@ -103,16 +114,30 @@ export class SlipService {
     // Server-generated key; the guest's file name is never used.
     const key = `slips/${at.slice(0, 4)}/${at.slice(5, 7)}/${assetId}.${image.extension}`;
     await this.bucket.put(key, bytes, { httpMetadata: { contentType: image.mime, cacheControl: "private, no-store" } });
+    const asset = { id: assetId, bookingId: booking.id, key, mime: image.mime, size: bytes.length, width: image.width, height: image.height, sha256, now: at };
     try {
-      const results = await this.db.batch([
-        this.repo.claimForSlipStatement(booking.id, at),
-        this.repo.insertSlipAssetStatement({ id: assetId, bookingId: booking.id, key, mime: image.mime, size: bytes.length, width: image.width, height: image.height, sha256, now: at }),
-        // The deposit on a deposit plan, else the whole total: what the slip must show.
-        this.repo.insertSlipPaymentStatement({ id: paymentId, bookingId: booking.id, amount: dueOnline(booking), assetId, sha256, channel, now: at }),
+      const notices = [
         this.log.eventStatement("SLIP_UPLOADED", "INFO", meta, { identifier: booking.booking_code }),
         ...(this.outbox ? await this.outbox.slipSubmitted(paymentId, booking.id, at) : []),
-      ]);
-      if (!results[0]?.results.length) throw new ConflictError("This booking is not waiting for a payment slip", "SLIP_NOT_ACCEPTED");
+      ];
+      if (forBalance) {
+        // The rest of a deposit: stored only while exactly this amount is still due (nothing taken at reception meanwhile).
+        const results = await this.db.batch([
+          this.repo.insertBalanceSlipAssetStatement({ ...asset, amount }),
+          this.repo.insertBalanceSlipPaymentStatement({ id: paymentId, bookingId: booking.id, amount, assetId, sha256, channel, now: at }),
+          ...notices,
+        ]);
+        if (!results[1]?.results.length) throw new ConflictError("This booking is not waiting for a payment slip", "SLIP_NOT_ACCEPTED");
+      } else {
+        const results = await this.db.batch([
+          this.repo.claimForSlipStatement(booking.id, at),
+          this.repo.insertSlipAssetStatement(asset),
+          // The deposit on a deposit plan, else the whole total: what the slip must show.
+          this.repo.insertSlipPaymentStatement({ id: paymentId, bookingId: booking.id, amount, assetId, sha256, channel, now: at }),
+          ...notices,
+        ]);
+        if (!results[0]?.results.length) throw new ConflictError("This booking is not waiting for a payment slip", "SLIP_NOT_ACCEPTED");
+      }
     } catch (error) {
       await this.bucket.delete(key).catch(() => undefined); // no orphan objects
       if (/UNIQUE constraint failed: payments\.slip_sha256/.test(String(error))) {
@@ -180,8 +205,7 @@ export class SlipService {
         await this.db.batch([
           this.repo.insertVerificationStatement({ ...record, result: "PASSED", failureCode: null, transactionRef: slip.transactionRef }),
           this.repo.markVerifiedStatement(paymentId, slip.transferredAt, null, now),
-          this.repo.confirmVerifiedStatement(payment.booking_id, now),
-          ...(this.outbox ? await this.outbox.bookingConfirmed(payment.booking_id, now) : []),
+          ...(await this.settledStatements(payment, now)),
         ]);
         return "VERIFIED";
       } catch (error) {
@@ -254,8 +278,7 @@ export class SlipService {
           transferredAt: null, senderBank: null, receiverBank: null, receiverMasked: null, transactionRef: own ? null : input.transactionRef,
           redacted: null, verifiedBy: actor.userId, now,
         }),
-        this.repo.confirmVerifiedStatement(payment.booking_id, now),
-        ...(this.outbox ? await this.outbox.bookingConfirmed(payment.booking_id, now) : []),
+        ...(await this.settledStatements(payment, now)),
       ]);
       if (!results[0]?.results.length) throw new ConflictError("This slip was already handled", "SLIP_ALREADY_HANDLED");
     } catch (error) {
@@ -277,6 +300,10 @@ export class SlipService {
     await this.authz.requirePermission(actor, "payments.verify", meta);
     if (input.cancelBooking) await this.authz.requirePermission(actor, "bookings.cancel", meta);
     const payment = await this.pending(paymentId);
+    // The rest of a deposit: the booking is already confirmed and stays so (the guest pays at check-in instead).
+    if (input.cancelBooking && (payment.is_balance === 1 || payment.booking_status === "CONFIRMED")) {
+      throw new ConflictError("This booking is already confirmed; cancel it from the booking page", "BOOKING_ALREADY_CONFIRMED");
+    }
     const now = this.clock();
     const hold = (await this.pricing.bookingSettings()).hold_minutes;
     const at = iso(now);
@@ -303,6 +330,20 @@ export class SlipService {
     await this.log.auditStatement(actor.userId, input.cancelBooking ? "REJECT_SLIP_CANCEL_BOOKING" : "REJECT_SLIP", "payments", paymentId,
       { status: "PENDING_VERIFICATION" }, { status: "REJECTED", bookingCode: payment.booking_code, reason: reasonText, cancelBooking: input.cancelBooking }, meta).run();
     return this.item(paymentId);
+  }
+
+  /**
+   * After a payment was marked verified (same batch): a waiting booking is confirmed (+ its notices); for the rest of
+   * a deposit the booking is already confirmed, so staff only hear that the rest came in.
+   */
+  private async settledStatements(payment: SlipPaymentRow, now: string) {
+    if (payment.is_balance === 1) {
+      return this.outbox?.balancePaid ? await this.outbox.balancePaid(payment.id, payment.booking_id, now) : [];
+    }
+    return [
+      this.repo.confirmVerifiedStatement(payment.booking_id, now),
+      ...(this.outbox ? await this.outbox.bookingConfirmed(payment.booking_id, now) : []),
+    ];
   }
 
   private async pending(paymentId: string): Promise<SlipPaymentRow> {
@@ -334,6 +375,7 @@ function toQueueItem(r: SlipPaymentRow, checks: VerificationRow[]): SlipQueueIte
     submittedAt: r.submitted_at,
     slipUrl: r.slip_key ? `/api/admin/payments/${r.id}/slip` : null,
     reference: r.reference,
+    balance: r.is_balance === 1,
     rejectedReason: r.rejected_reason,
     verifications: checks.map(toVerificationDto),
   };

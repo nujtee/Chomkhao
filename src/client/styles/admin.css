@@ -1169,6 +1169,26 @@
   flex: 1 1 220px;
 }
 
+/* A yes/no filter (e.g. "still due at check-in") sitting on the same line as the selects. */
+.adm-filter--toggle {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.adm-filter.adm-filter--toggle input {
+  /* WCAG 2.2 target size: at least 24 × 24. */
+  width: 24px;
+  height: 24px;
+  min-height: 0;
+  padding: 0;
+  margin: 0;
+  accent-color: var(--color-primary);
+}
+
 .adm-filter select,
 .adm-filter input {
   min-height: 44px;

@@ -5,7 +5,7 @@
 
 import type { StayActionsDto } from "./stay.ts";
 import type { GuestLineDto } from "./line-types.ts";
-import type { PaymentAccountSnapshotDto, PaymentDto, PaymentInstructionsDto } from "./payment-types.ts";
+import type { BalancePaymentDto, PaymentAccountSnapshotDto, PaymentDto, PaymentInstructionsDto } from "./payment-types.ts";
 
 export type BookingItemType = "HOUSE" | "VIP_TENT" | "OWN_TENT";
 export type BookingStatus = "PENDING" | "CONFIRMED" | "CHECKED_IN" | "CHECKED_OUT" | "CANCELLED" | "EXPIRED" | "NO_SHOW";
@@ -136,12 +136,14 @@ export interface PublicBookingDto extends QuoteDto {
   createdAt: string;
   /** LINE updates for this booking (Phase 11): offered when the property has it on; linked = guest opted in. */
   lineUpdates: GuestLineDto;
-  /** Where and how much to pay — present only while the booking awaits payment. */
   /** Money received (verified / paid payments, before refunds). */
   paidSatang: number;
   /** Still to pay: total − paid. For a confirmed deposit booking, the amount due at check-in. */
   balanceSatang: number;
+  /** Where and how much to pay — present only while the booking awaits payment. */
   paymentInstructions: PaymentInstructionsDto | null;
+  /** Deposit plan, confirmed booking still owing money: the guest may transfer the rest before the stay. */
+  balancePayment: BalancePaymentDto | null;
   /** Why the last payment was not accepted (shown while the guest can pay again). */
   paymentRejectedReason: string | null;
   /** Why staff cancelled the booking. */

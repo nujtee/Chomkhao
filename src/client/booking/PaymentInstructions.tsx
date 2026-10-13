@@ -50,9 +50,11 @@ const SLIP: readonly PaymentChannel[] = ["PROMPTPAY", "BANK_TRANSFER", "QR_CODE"
  * `slip(channel)` renders the slip form for the chosen slip channel.
  */
 export function PaymentInstructions({
-  payment, expiresAt, bookingCode, phone, slip, laterSatang = 0,
+  payment, expiresAt, bookingCode, phone, slip, laterSatang = 0, labels,
 }: {
   payment: PaymentInstructionsDto;
+  /** Other wording for the same panel, e.g. the rest of a deposit paid before the stay. */
+  labels?: { title: string; amount: string; intro: string; afterTransfer: string };
   /** Deposit plan: what is left for check-in (0 = the amount due is everything). */
   laterSatang?: number;
   expiresAt: string | null;
@@ -98,9 +100,10 @@ export function PaymentInstructions({
 
   return (
     <section className="pay" aria-labelledby={`${id}-h`}>
-      <h2 id={`${id}-h`} className="pay__title">{bt.payTitle}</h2>
+      <h2 id={`${id}-h`} className="pay__title">{labels?.title ?? bt.payTitle}</h2>
+      {labels && <p className="pay__intro">{labels.intro}</p>}
       <p className="pay__amount">
-        <span>{laterSatang > 0 ? bt.amountDueDeposit : bt.amountDue}</span>
+        <span>{labels?.amount ?? (laterSatang > 0 ? bt.amountDueDeposit : bt.amountDue)}</span>
         <strong>{amount}</strong>
       </p>
       {laterSatang > 0 && <p className="pay__later">{fill(bt.payLaterNote, { amount: formatBaht(laterSatang, locale.code) })}</p>}
@@ -190,7 +193,7 @@ export function PaymentInstructions({
 
       {SLIP.includes(current) && (
         <>
-          <p className="pay__note">{bt.pay.afterTransfer}</p>
+          <p className="pay__note">{labels?.afterTransfer ?? bt.pay.afterTransfer}</p>
           {slip(current as SlipChannel)}
         </>
       )}

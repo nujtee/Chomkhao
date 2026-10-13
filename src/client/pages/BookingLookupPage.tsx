@@ -7,6 +7,7 @@ import { Link } from "../router/Router.tsx";
 import { fill } from "../accommodation/UnitCard.tsx";
 import { bookingErrorText, cancelPaypalOrder, capturePaypalOrder, lookupBooking, recallAfterPaypal } from "../booking/api.ts";
 import { StatusPill } from "../booking/Confirmation.tsx";
+import { BalancePay } from "../booking/BalancePay.tsx";
 import { PaymentInstructions } from "../booking/PaymentInstructions.tsx";
 import { SlipStatus, SlipUpload } from "../booking/SlipUpload.tsx";
 import { BookingSummary, useDateTimeText } from "../booking/Summary.tsx";
@@ -129,12 +130,13 @@ export function BookingLookupPage() {
           <SlipStatus booking={booking} />
           {booking.paymentInstructions ? (
             <PaymentInstructions payment={booking.paymentInstructions} expiresAt={booking.expiresAt} bookingCode={booking.bookingCode}
-          laterSatang={booking.totalSatang - booking.paymentInstructions.amountDueSatang} phone={phone.trim()}
+              laterSatang={booking.totalSatang - booking.paymentInstructions.amountDueSatang} phone={phone.trim()}
               slip={(channel) => (
                 <SlipUpload bookingCode={booking.bookingCode} phone={phone.trim()} channel={channel}
                   onDone={(r) => { paymentSubmittedEvent(r.booking); setBooking(r.booking); }} />
               )} />
           ) : booking.expiresAt && <p className="notice" role="note">{fill(bt.holdUntil, { time: timeText(booking.expiresAt) })}</p>}
+          <BalancePay booking={booking} phone={phone.trim()} onChange={setBooking} />
           <LineUpdates booking={booking} phone={phone.trim()} onChange={setBooking} />
           <BookingSummary quote={booking} />
         </section>

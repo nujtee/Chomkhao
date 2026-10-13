@@ -334,6 +334,15 @@ export class LineRepository {
       "EXISTS (SELECT 1 FROM payments p WHERE p.id = ?7 AND p.status = 'PENDING_VERIFICATION')", [paymentId]);
   }
 
+  /**
+   * Deposit plan: the rest of booking ?3 came in — payment ?7 was marked verified / paid in this batch (marker:
+   * updated_at = now). Same kind as the deposit's confirmation, one message per payment.
+   */
+  balancePaidStatement(paymentId: string, bookingId: string, now: string): D1PreparedStatementLike {
+    return this.staffOutbox("PAYMENT_CONFIRMED", "notify_payment", `PAYMENT_CONFIRMED:${paymentId}:staff:`, bookingId, { paymentId }, now, now,
+      "EXISTS (SELECT 1 FROM payments p WHERE p.id = ?7 AND p.booking_id = ?3 AND p.status IN ('VERIFIED', 'PAID') AND p.updated_at = ?8)", [paymentId, now]);
+  }
+
   /** A CONFIRMED booking with food was cancelled in this batch (marker: cancelled_at = now). */
   bookingCancelledStatement(bookingId: string, now: string): D1PreparedStatementLike {
     return this.staffOutbox("FOOD_CANCELLED", "notify_food", `FOOD_CANCELLED:${bookingId}:staff:`, bookingId, null, now, now,
@@ -524,7 +533,8 @@ export class LineRepository {
       this.db
         .prepare(
           `SELECT id, booking_code, customer_name, customer_phone, customer_email, check_in, check_out, nights, adults, children, booking_status,
-                  payment_status, total_satang, ${deposit} AS deposit_satang, cancel_reason, expires_at, created_at
+                  payment_status, total_satang, ${deposit} AS deposit_satang, cancel_reason, expires_at, created_at,
+                  (SELECT COALESCE(SUM(p.amount_satang), 0) FROM payments p WHERE p.booking_id = bookings.id AND p.status IN ('VERIFIED', 'PAID')) AS paid_satang
              FROM bookings WHERE id IN (SELECT value FROM json_each(?1)) ORDER BY check_in, booking_code`,
         )
         .bind(list),
@@ -550,6 +560,7 @@ export class LineRepository {
     type B = {
       id: string; booking_code: string; customer_name: string; customer_phone: string; customer_email: string | null; check_in: string; check_out: string; nights: number; adults: number; children: number;
       booking_status: string; payment_status: string; total_satang: number; deposit_satang: number | null; cancel_reason: string | null; expires_at: string | null; created_at: string;
+      paid_satang: number;
     };
     type I = { booking_id: string; item_type: MsgBooking["itemType"]; quantity: number; unit_name_snapshot: string; tarps: number };
     type F = { booking_id: string; service_date: string; option_name_snapshot: string; quantity: number; service_time: string | null; category: string };
@@ -569,7 +580,7 @@ export class LineRepository {
         itemType: item?.item_type ?? "HOUSE", itemName: item?.unit_name_snapshot ?? "—", tents: item?.item_type === "OWN_TENT" ? item.quantity : 0,
         tarps: item?.item_type === "OWN_TENT" ? item.tarps : 0,
         adults: r.adults, children: r.children, bookingStatus: r.booking_status, paymentStatus: r.payment_status,
-        totalSatang: r.total_satang, depositSatang: r.deposit_satang, food: foodBy.get(r.id) ?? [],
+        totalSatang: r.total_satang, depositSatang: r.deposit_satang, paidSatang: r.paid_satang, food: foodBy.get(r.id) ?? [],
         cancelReason: r.cancel_reason, expiresAt: r.booking_status === "PENDING" ? r.expires_at : null, createdAt: r.created_at,
       };
     });
@@ -603,8 +614,15 @@ export class LineRepository {
       .first();
   }
 
-  payment(paymentId: string): Promise<{ status: string; amount_satang: number; channel: string | null; rejected_reason: string | null } | null> {
-    return this.db.prepare("SELECT status, amount_satang, channel, rejected_reason FROM payments WHERE id = ?1").bind(paymentId).first();
+  payment(paymentId: string): Promise<{ status: string; amount_satang: number; method: string; channel: string | null; rejected_reason: string | null; is_balance: number } | null> {
+    return this.db
+      .prepare(
+        `SELECT p.status, p.amount_satang, p.method, p.channel, p.rejected_reason,
+                CASE WHEN b.confirmed_at IS NOT NULL AND p.submitted_at > b.confirmed_at THEN 1 ELSE 0 END AS is_balance
+           FROM payments p JOIN bookings b ON b.id = p.booking_id WHERE p.id = ?1`,
+      )
+      .bind(paymentId)
+      .first();
   }
 
   /** Newest automatic check of a payment (for the staff review message). */

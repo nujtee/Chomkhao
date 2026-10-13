@@ -35,6 +35,8 @@ export interface MsgBooking {
   totalSatang: number;
   /** Deposit plan: the amount paid online; the rest is paid at check-in (migration 0025). */
   depositSatang?: number | null;
+  /** Money received so far (verified / paid payments). */
+  paidSatang?: number;
   food: MsgFood[];
   /** Why staff cancelled (guest messages). */
   cancelReason?: string | null;
@@ -79,6 +81,14 @@ const th = {
   depositOnline: "มัดจำ (ชำระออนไลน์)",
   depositPaid: "มัดจำที่ชำระแล้ว",
   balanceAtCheckIn: "คงเหลือ ชำระวันเช็กอิน",
+  balanceLabel: "ยอดคงเหลือ",
+  balanceReceivedTitle: "💰 ได้รับยอดคงเหลือแล้ว — ชำระครบ",
+  balanceSlip: "ยอดคงเหลือ (รับมัดจำแล้ว)",
+  balanceDueLine: "💰 ค้างรับตอนเช็กอิน: {amount}",
+  payAhead: "โอนล่วงหน้าได้ที่หน้าการจอง",
+  guestBalanceRejectedTitle: "⚠️ สลิปยอดคงเหลือยังไม่ผ่านการตรวจสอบ",
+  guestBalanceRejectedIntro: "คุณ{name} สลิปยอดคงเหลือของการจอง {code} ยังไม่ผ่านการตรวจสอบ การจองของคุณยังยืนยันอยู่",
+  payBalanceAgain: "ส่งสลิปใหม่ที่หน้าการจอง หรือชำระที่จุดเช็กอิน",
   open: "เปิดดู",
   kitchenTitle: "🍽️ อาหารที่ต้องเตรียม{when}: {date}",
   noFood: "ไม่มีรายการอาหาร",
@@ -163,6 +173,14 @@ const en: Texts = {
   depositOnline: "Deposit (paid online)",
   depositPaid: "Deposit paid",
   balanceAtCheckIn: "Balance, paid at check-in",
+  balanceLabel: "Balance",
+  balanceReceivedTitle: "💰 Balance received — paid in full",
+  balanceSlip: "Balance (deposit already paid)",
+  balanceDueLine: "💰 Still due at check-in: {amount}",
+  payAhead: "You can also transfer it ahead on your booking page.",
+  guestBalanceRejectedTitle: "⚠️ Your balance transfer could not be accepted yet",
+  guestBalanceRejectedIntro: "{name}, the slip for the balance of booking {code} was not accepted. Your booking stays confirmed.",
+  payBalanceAgain: "Send a new slip on your booking page, or pay at check-in.",
   open: "Open",
   kitchenTitle: "🍽️ Food to prepare {when}: {date}",
   noFood: "No food orders.",
@@ -245,6 +263,14 @@ const zh: Texts = {
   depositOnline: "定金（在线支付）",
   depositPaid: "已付定金",
   balanceAtCheckIn: "余款（入住时支付）",
+  balanceLabel: "余款",
+  balanceReceivedTitle: "💰 已收到余款 — 已付清",
+  balanceSlip: "余款（定金已付）",
+  balanceDueLine: "💰 入住时待收：{amount}",
+  payAhead: "也可在预订页面提前转账。",
+  guestBalanceRejectedTitle: "⚠️ 您的余款转账暂未通过审核",
+  guestBalanceRejectedIntro: "{name}，预订 {code} 的余款转账凭证未通过审核。您的预订仍然有效。",
+  payBalanceAgain: "请在预订页面重新上传凭证，或在入住时付款。",
   open: "查看",
   kitchenTitle: "🍽️ {when}需准备的餐饮：{date}",
   noFood: "没有餐饮订单。",
@@ -399,7 +425,10 @@ export function checkinDigestBlocks(f: LineFormatter, p: { date: string; daysBef
     p.bookings.length ? fill(t.bookingsCount, { n: p.bookings.length }) : t.noCheckins,
     ...(p.link ? [`${t.open}: ${p.link}`] : []),
   ].join("\n");
-  return [head, ...p.bookings.map((b, i) => `${i + 1}) ${f.bookingBlock(b)}`)];
+  return [head, ...p.bookings.map((b, i) => [
+    `${i + 1}) ${f.bookingBlock(b)}`,
+    ...(b.bookingStatus === "CONFIRMED" && stillDue(b) > 0 ? [fill(t.balanceDueLine, { amount: f.money(stillDue(b)) })] : []),
+  ].join("\n"))];
 }
 
 export function kitchenDigestBlocks(f: LineFormatter, p: { date: string; daysBefore: number; dishes: KitchenDish[]; link: string | null }): string[] {
@@ -438,6 +467,8 @@ export function paymentReviewText(
     t.reviewTitle,
     `${b.code} · ${b.customerName}`,
     `${t.amount}: ${f.money(amountSatang)}${extra.channel ? ` · ${t.channels[extra.channel] ?? extra.channel}` : ""}`,
+    // The rest of a deposit: the booking is already confirmed.
+    ...(b.depositSatang && b.bookingStatus === "CONFIRMED" ? [t.balanceSlip] : []),
     `${t.checkIn}: ${f.date(b.checkIn)} (${fill(t.nights, { n: b.nights })})`,
     f.stayLine(b),
     ...(check ? [check.result === "PASSED" ? t.autoPassed : fill(t.autoFailed, { reason: f.failure(check.failure_code ?? "INTERNAL") })] : []),
@@ -450,8 +481,42 @@ function depositLines(f: LineFormatter, b: MsgBooking, paid: boolean): string[] 
   if (!b.depositSatang) return [];
   return [
     `${paid ? f.t.depositPaid : f.t.depositOnline}: ${f.money(b.depositSatang)}`,
-    `${f.t.balanceAtCheckIn}: ${f.money(Math.max(0, b.totalSatang - b.depositSatang))}`,
+    `${f.t.balanceAtCheckIn}: ${f.money(stillDue(b))}`,
   ];
+}
+
+/** Deposit plan: what the booking still owes (total − money received; the deposit alone if that is unknown). */
+export function stillDue(b: MsgBooking): number {
+  return b.depositSatang ? Math.max(0, b.totalSatang - (b.paidSatang ?? b.depositSatang)) : 0;
+}
+
+/** Staff: the rest of a deposit came in (the guest's transfer verified, or taken at reception). */
+export function balanceReceivedText(f: LineFormatter, b: MsgBooking, amountSatang: number, method: string | null, channel: string | null): string {
+  const t = f.t;
+  const by = f.paidBy(method, channel);
+  return [
+    t.balanceReceivedTitle,
+    `${b.code} · ${b.customerName}`,
+    `${t.balanceLabel}: ${f.money(amountSatang)}${by ? ` · ${t.paidBy}: ${by}` : ""}`,
+    `${t.total}: ${f.money(b.totalSatang)}`,
+    `${t.checkIn}: ${f.date(b.checkIn)} (${fill(t.nights, { n: b.nights })})`,
+    f.stayLine(b),
+  ].join("\n");
+}
+
+/** Guest: the slip for the rest was turned down — the booking stays confirmed; send another or pay at check-in. */
+export function guestBalanceRejectedText(f: LineFormatter, b: MsgBooking, p: { reason: string | null; link: string | null; siteName: string | null }): string {
+  const t = f.t;
+  return [
+    t.guestBalanceRejectedTitle,
+    fill(t.guestBalanceRejectedIntro, { name: b.customerName, code: b.code }),
+    ...(p.reason ? [`${t.reason}: ${p.reason}`] : []),
+    "",
+    t.payBalanceAgain,
+    `${t.balanceLabel}: ${f.money(stillDue(b))}`,
+    ...(p.link ? [`${t.viewBooking}: ${p.link}`] : []),
+    ...(p.siteName ? ["", p.siteName] : []),
+  ].join("\n");
 }
 
 export function paymentConfirmedText(f: LineFormatter, b: MsgBooking, method: string | null, channel: string | null = null): string {
@@ -535,7 +600,8 @@ export function guestCheckinText(
     "",
     f.bookingBlock(b, { customer: false }),
     // Deposit plan: what to bring for check-in.
-    ...(b.depositSatang && b.bookingStatus === "CONFIRMED" ? [`${t.balanceAtCheckIn}: ${f.money(Math.max(0, b.totalSatang - b.depositSatang))}`] : []),
+    ...(b.bookingStatus === "CONFIRMED" && stillDue(b) > 0
+      ? [`${t.balanceAtCheckIn}: ${f.money(stillDue(b))}`, ...(p.link ? [t.payAhead] : [])] : []),
     ...(p.address || p.mapUrl || p.phone ? [""] : []),
     ...(p.address ? [`${t.address}: ${p.address}`] : []),
     ...(p.mapUrl ? [`${t.map}: ${p.mapUrl}`] : []),

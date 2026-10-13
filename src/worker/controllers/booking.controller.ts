@@ -198,8 +198,10 @@ export function bookingController(services: ServicesFor) {
       const before = v.string("before", { pattern: TIMESTAMP });
       const limitRaw = Number(q.get("limit") ?? 50);
       const limit = Number.isInteger(limitRaw) && limitRaw >= 1 && limitRaw <= 100 ? limitRaw : 50;
+      // Deposit plan: confirmed bookings that still owe the rest (dashboard "still due at check-in").
+      const due = q.get("due") === "1";
       v.assertValid();
-      return jsonOk(await services(ctx).bookings.adminList(auth, { status, payment, from, to, q: search, before, limit }, requestMeta(ctx)), { headers: NO_STORE });
+      return jsonOk(await services(ctx).bookings.adminList(auth, { status, payment, from, to, q: search, before, limit, due }, requestMeta(ctx)), { headers: NO_STORE });
     }),
 
     get: withAuth(services, async (ctx, auth) =>

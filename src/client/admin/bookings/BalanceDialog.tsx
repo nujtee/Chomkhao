@@ -5,8 +5,9 @@ import { format } from "../../../shared/i18n/admin-messages.ts";
 import type { BalanceDueDto, BalanceMethod } from "../../../shared/payment-types.ts";
 import { apiGet, apiRequest } from "../../api/client.ts";
 import { QrCode } from "../../booking/QrCode.tsx";
+import { Link } from "../../router/Router.tsx";
 import { useAdmin } from "../AdminContext.tsx";
-import { Alert, Button, detailMessage, errorMessage } from "../ui.tsx";
+import { Alert, Button, detailMessage, errorMessage, useDateFormatter } from "../ui.tsx";
 
 /** Ways to take the rest at reception, in the order offered: those the account allows, cash always. */
 export function balanceMethods(due: BalanceDueDto): BalanceMethod[] {
@@ -29,7 +30,8 @@ export function BalanceDialog({ code, open, onClose, onDone }: {
   onClose: () => void;
   onDone: (booking: AdminBookingDto, message: string) => void;
 }) {
-  const { t, can, locale } = useAdmin();
+  const { t, can, locale, href } = useAdmin();
+  const dateTime = useDateFormatter();
   const id = useId();
   const ref = useRef<HTMLDialogElement>(null);
   const [due, setDue] = useState<BalanceDueDto | null>(null);
@@ -100,7 +102,18 @@ export function BalanceDialog({ code, open, onClose, onDone }: {
             <strong>{baht(due.balanceSatang)}</strong>
           </p>
 
-          {step === "choose" ? (
+          {due.pendingSlip ? (
+            // The guest already transferred the rest: settle that slip first, never take the money twice.
+            <>
+              <Alert kind="info">
+                {format(t.pay.balPendingSlip, { amount: baht(due.pendingSlip.amountSatang), time: dateTime(due.pendingSlip.submittedAt) })}
+                {" "}<Link to={can("slips.view") ? href("slips") : `${href("bookings", code)}#payment`} onClick={onClose}>{t.pay.balReviewSlip}</Link>
+              </Alert>
+              <div className="adm-dialog__actions">
+                <Button variant="secondary" onClick={onClose}>{t.common.close}</Button>
+              </div>
+            </>
+          ) : step === "choose" ? (
             <>
               <fieldset className="adm-balance__ways">
                 <legend className="adm-field__hint">{t.pay.balChoose}</legend>

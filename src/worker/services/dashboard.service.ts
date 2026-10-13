@@ -41,8 +41,9 @@ export class DashboardService {
     const seesMoney = this.authz.can(actor, "payments.view") || this.authz.can(actor, "reports.view");
 
     const analyticsFrom = addDays(today, -(ANALYTICS_DAYS - 1));
-    const [counts, inv, analytics, web] = await Promise.all([
+    const [counts, due, inv, analytics, web] = await Promise.all([
       this.repo.counts(today, monthStart, offset),
+      this.repo.balanceDue(),
       this.repo.inventoryTonight(today),
       this.repo.analytics(analyticsFrom, offset),
       this.ga4 ? this.ga4(analyticsFrom, today).catch((): Ga4DashboardResult => ({ status: "ERROR", fetchedAt: null, numbers: null }))
@@ -73,6 +74,7 @@ export class DashboardService {
       const byDay = new Map(trendRows.map((r) => [r.day, r]));
       money = {
         pendingPaymentSatang: counts.pending_satang,
+        balanceDueSatang: due.satang,
         today: revenue(day),
         month: revenue(month),
         trend: Array.from({ length: TREND_DAYS }, (_, i) => {
@@ -94,6 +96,7 @@ export class DashboardService {
         bookingsCreatedMonth: counts.created_month,
         pendingPayment: counts.pending_payment,
         slipsToReview: counts.slips,
+        balanceDue: due.bookings,
       },
       inventory: {
         houses: { total: units("HOUSE").total, available: units("HOUSE").available },

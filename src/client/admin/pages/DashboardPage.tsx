@@ -62,6 +62,11 @@ export function DashboardPage() {
               to={can("bookings.view") ? `${href("bookings")}?payment=UNPAID` : undefined} />
             <Kpi label={c.dash.slipsToReview} value={num.format(data.counts.slipsToReview)} tone={data.counts.slipsToReview ? "warn" : undefined}
               to={can("slips.view") ? href("slips") : undefined} />
+            {/* Deposit plan: the rest still to receive — at check-in, or transferred by the guest before the stay. */}
+            <Kpi label={c.dash.balanceDue}
+              value={data.money ? baht(data.money.balanceDueSatang) : num.format(data.counts.balanceDue)}
+              sub={data.money ? format(c.dash.balanceDueSub, { n: num.format(data.counts.balanceDue) }) : undefined}
+              to={can("bookings.view") ? `${href("bookings")}?due=1` : undefined} />
             <Kpi label={c.dash.availableHouses} value={num.format(data.inventory.houses.available)} sub={format(c.dash.ofTotal, { total: data.inventory.houses.total })} />
             <Kpi label={c.dash.availableVip} value={num.format(data.inventory.vip.available)} sub={format(c.dash.ofTotal, { total: data.inventory.vip.total })} />
             <Kpi label={c.dash.campingUsed} value={data.inventory.camping.enabled ? num.format(data.inventory.camping.used) : c.dash.campingOff}

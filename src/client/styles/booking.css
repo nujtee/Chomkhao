@@ -786,6 +786,17 @@ button.button--secondary {
   margin-bottom: 8px;
 }
 
+.pay__intro {
+  margin: 0 0 12px;
+  color: var(--color-muted);
+  font-size: 0.9375rem;
+}
+
+/* The rest of a deposit has no deadline line under the amount: keep the same gap before the channels. */
+.pay__intro + .pay__amount {
+  margin-bottom: 12px;
+}
+
 .pay__amount {
   display: flex;
   justify-content: space-between;

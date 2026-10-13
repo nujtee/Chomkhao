@@ -44,7 +44,10 @@ export function PaymentPanel({ booking, notice = null, onChanged }: {
 
   // A pending slip is approved / declined (here or on the Slips page), never answered by recording a second payment.
   const awaiting = booking.status === "PENDING" && ["UNPAID", "REJECTED"].includes(booking.paymentStatus);
-  const pending = booking.status === "PENDING" && can("payments.verify") ? booking.payments.find((p) => p.status === "PENDING_VERIFICATION") ?? null : null;
+  // …and on a confirmed deposit booking, the slip the guest sent for the rest before the stay.
+  const forBalance = booking.status === "CONFIRMED";
+  const pending = (booking.status === "PENDING" || forBalance) && can("payments.verify")
+    ? booking.payments.find((p) => p.status === "PENDING_VERIFICATION") ?? null : null;
 
   async function doApprove() {
     setConfirm(null);
@@ -54,8 +57,9 @@ export function PaymentPanel({ booking, notice = null, onChanged }: {
     try {
       await apiRequest("POST", `/api/admin/payments/${encodeURIComponent(pending.id)}/verify`, txRef.trim() ? { transactionRef: txRef.trim() } : {});
       setTxRef("");
-      setMessage({ kind: "success", text: t.slip.verifiedDone });
-      onChanged(t.slip.verifiedDone);
+      const done = forBalance ? t.slip.verifiedBalanceDone : t.slip.verifiedDone;
+      setMessage({ kind: "success", text: done });
+      onChanged(done);
     } catch (err) {
       setMessage({ kind: "error", text: detailMessage(t, err) });
     } finally {
@@ -124,7 +128,7 @@ export function PaymentPanel({ booking, notice = null, onChanged }: {
   const acc = booking.paymentAccount;
   const deposit = booking.depositSatang;
   /** Deposit plan: the first money in is the deposit, later money is the balance taken at check-in. */
-  const firstPaid = booking.payments.find((p) => p.status === "PAID" || p.status === "VERIFIED" || p.status === "REFUNDED")?.id ?? null;
+  const firstPaid = booking.payments.findIndex((p) => p.status === "PAID" || p.status === "VERIFIED" || p.status === "REFUNDED");
   return (
     <div className="adm-card" id="payment">
       <h2 className="adm-h2">{t.pay.paymentTitle} · <span className="adm-muted">{t.bk[`p${booking.paymentStatus}`]}</span></h2>
@@ -163,15 +167,16 @@ export function PaymentPanel({ booking, notice = null, onChanged }: {
               </tr>
             </thead>
             <tbody>
-              {booking.payments.map((p) => (
+              {booking.payments.map((p, i) => (
                 <tr key={p.id}>
                   <td className="adm-small">
                     {dateTime(p.paidAt ?? p.submittedAt)}
                     {p.verifiedByName && <div className="adm-muted">{t.pay.by} {p.verifiedByName}</div>}
                   </td>
                   <td className="adm-small">
-                    {deposit !== null && (p.status === "PAID" || p.status === "VERIFIED" || p.status === "REFUNDED") && (
-                      <span className="adm-badge adm-badge--muted adm-deposit__kind">{p.id === firstPaid ? t.pay.kindDeposit : t.pay.kindBalance}</span>
+                    {/* …and anything after it (taken at reception, or a slip the guest sent for the rest, even while checked). */}
+                    {deposit !== null && firstPaid >= 0 && i >= firstPaid && (
+                      <span className="adm-badge adm-badge--muted adm-deposit__kind">{i === firstPaid ? t.pay.kindDeposit : t.pay.kindBalance}</span>
                     )}
                     {p.channel ? t.pay[`c${p.channel}`] : t.pay[`m${p.method}`]}
                     {p.reference && <div className="adm-muted">{t.pay.ref}: {p.reference}</div>}
@@ -204,7 +209,7 @@ export function PaymentPanel({ booking, notice = null, onChanged }: {
 
       {pending && (
         <div className="adm-subform adm-slip-review" role="group" aria-labelledby="slip-review-h">
-          <h3 id="slip-review-h" className="adm-h3 adm-subform__title">{t.pay.reviewTitle}</h3>
+          <h3 id="slip-review-h" className="adm-h3 adm-subform__title">{forBalance ? t.pay.reviewBalanceTitle : t.pay.reviewTitle}</h3>
           <div className="adm-slip-review__body">
             {pending.slipUrl && can("slips.view") && (
               <a href={pending.slipUrl} target="_blank" rel="noopener" className="adm-slip-review__img" aria-label={t.slip.openSlip}>
@@ -217,7 +222,7 @@ export function PaymentPanel({ booking, notice = null, onChanged }: {
                 {" · "}<span className="adm-small adm-muted">{t.slip.submitted} {dateTime(pending.submittedAt)}</span>
               </p>
               {pending.channel === "PAYPAL" && <Alert kind="info">{t.slip.paypalNote}</Alert>}
-              <p className="adm-field__hint">{t.pay.reviewHint}</p>
+              <p className="adm-field__hint">{forBalance ? t.pay.reviewBalanceHint : t.pay.reviewHint}</p>
               {can("slips.view") && <p className="adm-small"><Link to={href("slips")}>{t.pay.reviewChecks}</Link></p>}
               <form className="adm-inline" onSubmit={(e: FormEvent) => { e.preventDefault(); setConfirm("approve"); }}>
                 {pending.slipUrl && (
@@ -228,7 +233,7 @@ export function PaymentPanel({ booking, notice = null, onChanged }: {
               </form>
             </div>
           </div>
-          <DeclineDialog open={declining} code={booking.bookingCode} canCancel={can("bookings.cancel")} busy={busy}
+          <DeclineDialog open={declining} code={booking.bookingCode} canCancel={!forBalance && can("bookings.cancel")} busy={busy} balance={forBalance}
             onClose={() => setDeclining(false)} onSubmit={(r, c) => void doDecline(r, c)} />
         </div>
       )}

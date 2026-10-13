@@ -35,6 +35,8 @@ export interface OutboxLike {
   bookingCreated?(bookingId: string, now: string): Promise<D1PreparedStatementLike[]>;
   /** Staff turned a slip down (the guest may pay again). */
   paymentRejected?(paymentId: string, bookingId: string, now: string): Promise<D1PreparedStatementLike[]>;
+  /** Deposit plan: the rest came in (guest's transfer verified, or taken at reception) — payment marked in this batch. */
+  balancePaid?(paymentId: string, bookingId: string, now: string): Promise<D1PreparedStatementLike[]>;
 }
 
 export class CompositeOutbox implements OutboxLike {
@@ -53,6 +55,9 @@ export class CompositeOutbox implements OutboxLike {
   }
   async paymentRejected(paymentId: string, bookingId: string, now: string) {
     return (await Promise.all(this.parts.map((p) => p.paymentRejected?.(paymentId, bookingId, now) ?? Promise.resolve([])))).flat();
+  }
+  async balancePaid(paymentId: string, bookingId: string, now: string) {
+    return (await Promise.all(this.parts.map((p) => p.balancePaid?.(paymentId, bookingId, now) ?? Promise.resolve([])))).flat();
   }
 }
 

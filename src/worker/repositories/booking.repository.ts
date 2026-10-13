@@ -29,6 +29,8 @@ export interface BookingRow {
   deposit_satang: number | null;
   currency: string;
   expires_at: string | null;
+  /** When the booking was confirmed (payment in); later payments are the rest of a deposit. */
+  confirmed_at: string | null;
   cancelled_at: string | null;
   cancel_reason: string | null;
   idempotency_key: string | null;
@@ -107,7 +109,7 @@ export interface BookingTarpRow {
 const bookingColumns = (deposit: string) => `id, booking_code, language_code, source, check_in, check_out, nights, adults, children, customer_name,
   customer_phone, customer_phone_normalized, customer_email, customer_line_id, customer_note, booking_status, payment_status,
   accommodation_subtotal_satang, food_subtotal_satang, subtotal_satang, discount_satang, total_satang, ${deposit} AS deposit_satang, currency, expires_at,
-  cancelled_at, cancel_reason, idempotency_key, privacy_accepted_at, created_at, updated_at`;
+  confirmed_at, cancelled_at, cancel_reason, idempotency_key, privacy_accepted_at, created_at, updated_at`;
 const BOOKING_COLUMNS = bookingColumns("deposit_satang");
 /** Before migration 0025: no booking has a deposit. */
 const BOOKING_COLUMNS_LEGACY = bookingColumns("NULL");
@@ -195,12 +197,16 @@ export class BookingRepository {
 
   async list(filter: {
     status?: string; payment?: string; from?: string; to?: string; q?: string; qPhone?: string | null; before?: string; limit: number;
+    /** Only confirmed deposit bookings that still owe money (taken at check-in or transferred before). */
+    due?: boolean;
   }): Promise<AdminBookingListRow[]> {
     return withFallback(() => this.listWith(filter, "b.deposit_satang"), () => this.listWith(filter, "NULL"));
   }
 
   private async listWith(filter: {
     status?: string; payment?: string; from?: string; to?: string; q?: string; qPhone?: string | null; before?: string; limit: number;
+    /** Only confirmed deposit bookings that still owe money (taken at check-in or transferred before). */
+    due?: boolean;
   }, deposit: string): Promise<AdminBookingListRow[]> {
     const { results } = await this.db
       .prepare(
@@ -217,6 +223,7 @@ export class BookingRepository {
             AND (?4 IS NULL OR b.booking_code = ?4 OR b.customer_phone_normalized = ?5 OR b.customer_name LIKE ?6 ESCAPE '\\')
             AND (?7 IS NULL OR b.created_at < ?7)
             AND (?9 IS NULL OR b.payment_status = ?9)
+            AND (?10 = 0 OR (b.booking_status = 'CONFIRMED' AND ${deposit} IS NOT NULL AND b.total_satang > ${PAID_SQL}))
           ORDER BY b.created_at DESC, b.id DESC LIMIT ?8`,
       )
       .bind(
@@ -229,6 +236,7 @@ export class BookingRepository {
         filter.before ?? null,
         filter.limit,
         filter.payment ?? null,
+        filter.due ? 1 : 0,
       )
       .all<AdminBookingListRow>();
     return results;
