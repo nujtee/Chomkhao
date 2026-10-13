@@ -229,9 +229,10 @@ export class LineRepository {
             .bind(r.id, r.targetId, r.name, r.language, r.actorId, now, codeId)
         : this.db
             .prepare(
-              `INSERT INTO line_recipients (id, target_id, name, language_code, notify_checkin, notify_food, notify_payment, active, linked_via,
-                 created_at, created_by, updated_at, updated_by)
-               SELECT ?1, ?2, ?3, ?4, 1, 0, 0, 1, 'CODE', ?6, ?5, ?6, ?5 WHERE ${redeemedHere}`,
+              // A new chat gets new bookings, payments and check-ins; food is a kitchen choice, made in the table.
+              `INSERT INTO line_recipients (id, target_id, name, language_code, notify_checkin, notify_food, notify_payment, notify_booking,
+                 active, linked_via, created_at, created_by, updated_at, updated_by)
+               SELECT ?1, ?2, ?3, ?4, 1, 0, 1, 1, 1, 'CODE', ?6, ?5, ?6, ?5 WHERE ${redeemedHere}`,
             )
             .bind(r.id, r.targetId, r.name, r.language, r.actorId, now, codeId),
       this.db

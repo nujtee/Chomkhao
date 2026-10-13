@@ -263,7 +263,8 @@ export class LineService {
       this.log.auditStatement(actor.userId, "CREATE_LINE_LINK_CODE", "line", id, null, { name, language, expiresAt }, meta),
     ]);
     const s = await this.settingsDto();
-    return { id, code, message: `LINK ${code}`, expiresAt, addFriendUrl: s.addFriendUrl };
+    const message = `LINK ${code}`;
+    return { id, code, message, expiresAt, addFriendUrl: s.addFriendUrl, url: s.bot.basicId ? oaMessageUrl(s.bot.basicId, message) : null };
   }
 
   async linkStatus(actor: AuthContext, id: string, meta: RequestMeta): Promise<LineLinkStatusDto> {

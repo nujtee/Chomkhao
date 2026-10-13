@@ -300,6 +300,36 @@ describe("LINE notifications: outbox, delivery, retry, idempotency", () => {
     assert.equal(logs(h).length, 0);
   });
 
+  it("several admins, each linked with their own code, all get new bookings and payments by default", async () => {
+    const { h, admin } = await setup();
+    await enable(h, admin);
+    await h.api("POST", "/api/admin/line/check", { token: admin, body: {} }); // stores the bot's Basic ID
+    const admins = [["Owner", OWNER], ["Admin Aom", `U${"e5".repeat(16)}`], ["Admin Bee", `U${"f6".repeat(16)}`]] as const;
+    for (const [name, user] of admins) {
+      const code = await h.api<LineLinkCodeDto>("POST", "/api/admin/line/link-codes", { token: admin, body: { name, language: "th" } });
+      assert.equal(code.status, 201, JSON.stringify(code.body));
+      // Scanned on a phone: opens the chat with the Official Account, message filled in.
+      assert.equal(code.data.url, `https://line.me/R/oaMessage/@phasakura/?${encodeURIComponent(code.data.message)}`);
+      await h.webhook(textMessage({ type: "user", userId: user }, code.data.message));
+      const linked = await h.api<LineLinkStatusDto>("GET", `/api/admin/line/link-codes/${code.data.id}`, { token: admin });
+      assert.equal(linked.data.status, "LINKED");
+      const r = linked.data.recipient!;
+      assert.deepEqual([r.name, r.notifyBooking, r.notifyPayment, r.notifyCheckin, r.notifyFood], [name, true, true, true, false]);
+    }
+    const list = await h.api<LineRecipientDto[]>("GET", "/api/admin/line/recipients", { token: admin });
+    assert.equal(list.data.length, 3);
+
+    const b = await book(h);
+    await pay(h, admin, b);
+    await dispatch(h);
+    for (const r of list.data) {
+      // The outbox names the recipient row ("staff:<id>"), never the LINE id.
+      const types = logs(h).filter((l) => l.recipient === `staff:${r.id}`).map((l) => [l.notification_type, l.status]).sort();
+      assert.deepEqual(types, [["NEW_BOOKING", "SENT"], ["PAYMENT_CONFIRMED", "SENT"]], r.name);
+    }
+    for (const [, user] of admins) assert.equal(h.line.pushes.filter((p) => p.to === user).length, 2, user);
+  });
+
   it("payment confirmed → payment + kitchen notices in the same transaction; delivered once with a stable retry key", async () => {
     const { h, admin } = await setup();
     await enable(h, admin);

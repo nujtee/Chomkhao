@@ -108,6 +108,8 @@ export interface LineLinkCodeDto {
   message: string;
   expiresAt: string;
   addFriendUrl: string | null;
+  /** Opens the chat with the Official Account with `message` filled in (scan on a phone); null until the bot is checked. */
+  url: string | null;
 }
 
 export interface LineLinkStatusDto {

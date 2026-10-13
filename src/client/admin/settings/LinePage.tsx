@@ -7,6 +7,7 @@ import {
   type LineConnectionDto, type LineLinkCodeDto, type LineLinkStatusDto, type LineRecipientDto, type LineSettingsDto, type NotificationLogDto,
 } from "../../../shared/line-types.ts";
 import { ApiError, apiGet, apiRequest } from "../../api/client.ts";
+import { QrCode } from "../../booking/QrCode.tsx";
 import { Link } from "../../router/Router.tsx";
 import { useAdmin } from "../AdminContext.tsx";
 import { PageTabs } from "../cms/CmsKit.tsx";
@@ -391,38 +392,73 @@ function PairingCard({ settings, onLinked }: { settings: LineSettingsDto | null;
     }
   }
 
+  /** One person done (or the code ran out): start over for the next one. */
+  function next() {
+    setCode(null);
+    setStatus(null);
+    setName("");
+    setError(null);
+  }
+
+  const addFriend = settings?.addFriendUrl ?? null;
+  const done = status?.status === "LINKED" || status?.status === "EXPIRED";
   return (
     <div className="adm-card">
       <h2 className="adm-h2">{m.rec.pairTitle}</h2>
-      <ol className="line-steps">
-        <li>{m.rec.pairStep1}{settings?.addFriendUrl && <> — <a href={settings.addFriendUrl} target="_blank" rel="noopener noreferrer">{m.conn.addFriend}</a></>}</li>
-        <li>{m.rec.pairStep2}</li>
-        <li>{m.rec.pairStep3}</li>
+      <p>{m.rec.pairIntro}</p>
+      <ol className="line-steps line-steps--pair">
+        <li>
+          <p>{m.rec.pairStep1}</p>
+          {addFriend && (
+            <div className="line-qr">
+              <QrCode value={addFriend} label={m.rec.pairScanAdd} size={140} />
+              <div className="line-qr__text">
+                <span className="adm-label">{m.rec.pairScanAdd}</span>
+                <a href={addFriend} target="_blank" rel="noopener noreferrer">{m.conn.addFriend}</a>
+              </div>
+            </div>
+          )}
+        </li>
+        <li>
+          <p>{m.rec.pairStep2}</p>
+          {error && <Alert kind="error">{error}</Alert>}
+          {!code ? (
+            <form className="adm-row adm-row--wrap line-pair-form" onSubmit={(e) => void create(e)}>
+              <Field label={m.rec.pairName} required maxLength={80} value={name} onChange={(e) => setName(e.currentTarget.value)} />
+              <div className="adm-field">
+                <label htmlFor="line-pair-lang">{m.rec.language}</label>
+                <select id="line-pair-lang" value={language} onChange={(e) => setLanguage(e.currentTarget.value as LocaleCode)}>
+                  {LOCALES.map((l) => <option key={l.code} value={l.code}>{l.label}</option>)}
+                </select>
+              </div>
+              <Button type="submit" busy={busy} disabled={!name.trim()}>{m.rec.pairCreate}</Button>
+            </form>
+          ) : (
+            <div className="line-code" aria-live="polite">
+              {status?.status === "PENDING" && code.url && (
+                <div className="line-qr">
+                  <QrCode value={code.url} label={m.rec.pairScanCode} size={180} />
+                  <div className="line-qr__text">
+                    <span className="adm-label">{m.rec.pairScanCode}</span>
+                    <a href={code.url} target="_blank" rel="noopener noreferrer">{m.rec.pairOpenLine}</a>
+                  </div>
+                </div>
+              )}
+              <span className="adm-label">{code.url ? m.rec.pairOrType : m.rec.pairMessage}</span>
+              <div className="adm-onetime__row">
+                <output className="line-code__value adm-mono">{code.message}</output>
+                <CopyButton value={code.message} label={m.conn.copy} done={m.conn.copied} />
+              </div>
+              {status?.status === "LINKED" && <Alert kind="success">{format(m.rec.pairLinked, { name: status.recipient?.name ?? "" })}</Alert>}
+              {status?.status === "EXPIRED" && <Alert kind="error">{m.rec.pairExpired}</Alert>}
+              {status?.status === "PENDING" && <p className="adm-small adm-muted" role="status"><span className="line-spinner" aria-hidden="true" /> {format(m.rec.pairWaiting, { time: time(code.expiresAt) })}</p>}
+              {done && <div><Button onClick={next}>{m.rec.pairNext}</Button></div>}
+            </div>
+          )}
+        </li>
+        <li><p>{m.rec.pairStep3}</p></li>
       </ol>
       <p className="adm-field__hint">{m.rec.groupNote}</p>
-      {error && <Alert kind="error">{error}</Alert>}
-      <form className="adm-row adm-row--wrap line-pair-form" onSubmit={(e) => void create(e)}>
-        <Field label={m.rec.pairName} required maxLength={80} value={name} onChange={(e) => setName(e.currentTarget.value)} />
-        <div className="adm-field">
-          <label htmlFor="line-pair-lang">{m.rec.language}</label>
-          <select id="line-pair-lang" value={language} onChange={(e) => setLanguage(e.currentTarget.value as LocaleCode)}>
-            {LOCALES.map((l) => <option key={l.code} value={l.code}>{l.label}</option>)}
-          </select>
-        </div>
-        <Button type="submit" busy={busy} disabled={!name.trim()}>{m.rec.pairCreate}</Button>
-      </form>
-      {code && (
-        <div className="line-code" aria-live="polite">
-          <span className="adm-label">{m.rec.pairMessage}</span>
-          <div className="adm-onetime__row">
-            <output className="line-code__value adm-mono">{code.message}</output>
-            <CopyButton value={code.message} label={m.conn.copy} done={m.conn.copied} />
-          </div>
-          {status?.status === "LINKED" && <Alert kind="success">{format(m.rec.pairLinked, { name: status.recipient?.name ?? "" })}</Alert>}
-          {status?.status === "EXPIRED" && <Alert kind="error">{m.rec.pairExpired}</Alert>}
-          {status?.status === "PENDING" && <p className="adm-small adm-muted" role="status"><span className="line-spinner" aria-hidden="true" /> {format(m.rec.pairWaiting, { time: time(code.expiresAt) })}</p>}
-        </div>
-      )}
     </div>
   );
 }
@@ -431,7 +467,7 @@ function ManualAdd({ onAdded }: { onAdded: (r: LineRecipientDto) => void }) {
   const { locale } = useAdmin();
   const m = useLineMessages();
   const errors = useLineErrors();
-  const empty = { targetId: "", name: "", language: locale.code as LocaleCode, notifyBooking: true, notifyCheckin: true, notifyFood: false, notifyPayment: false };
+  const empty = { targetId: "", name: "", language: locale.code as LocaleCode, notifyBooking: true, notifyCheckin: true, notifyFood: false, notifyPayment: true };
   const [f, setF] = useState(empty);
   const [fieldErr, setFieldErr] = useState<Record<string, string>>({});
   const [msg, setMsg] = useState<Msg>(null);

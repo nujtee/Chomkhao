@@ -217,6 +217,31 @@ await check("Thai admin LINE page (390px)", async () => {
   await p.screenshot({ path: `${SHOTS}/i-line-th-mobile.png`, fullPage: true });
 });
 
+await check("Thai admin adds two more admins' LINE one after another: QR to add the OA, QR with the code, both get bookings + payments", async () => {
+  await pa.goto(`${BASE}/th/admin/settings-line`);
+  await pa.getByRole("tab", { name: "แชตผู้รับ" }).click();
+  await pa.getByRole("heading", { name: "เพิ่ม LINE ของแอดมิน / ทีมงาน" }).waitFor();
+  await pa.getByRole("img", { name: "สแกนเพื่อเพิ่มเพื่อน" }).waitFor();
+  const people = [["แอดมินเอ", `U${"e5".repeat(16)}`], ["แอดมินบี", `U${"f6".repeat(16)}`]];
+  for (const [i, [name, user]] of people.entries()) {
+    if (i > 0) await pa.getByRole("button", { name: "เพิ่มคนถัดไป" }).click();
+    await pa.getByLabel(/ชื่อแชต/).fill(name);
+    await pa.getByRole("button", { name: "สร้างรหัส" }).click();
+    await pa.getByRole("img", { name: "สแกนเพื่อส่งรหัสใน LINE" }).waitFor();
+    const message = (await pa.locator(".line-code__value").textContent()).trim();
+    const open = await pa.getByRole("link", { name: "เปิดใน LINE (บนมือถือเครื่องนี้)" }).getAttribute("href");
+    if (!open.startsWith("https://line.me/R/oaMessage/@") || !open.endsWith(encodeURIComponent(message))) throw new Error(open);
+    if (i === 0) await pa.screenshot({ path: `${SHOTS}/i-line-pair-qr.png`, fullPage: true });
+    const res = await webhook({ type: "user", userId: user }, message);
+    if (res.status() !== 200) throw new Error(await res.text());
+    await pa.getByText(`เชื่อมต่อแล้ว: ${name}`).waitFor({ timeout: 10000 });
+    const row = pa.locator("tr", { hasText: name });
+    await row.waitFor();
+    for (const label of ["การจองใหม่", "การชำระเงิน"]) if (!(await row.getByLabel(label).isChecked())) throw new Error(`${name}: ${label} off`);
+    if (await row.getByLabel("อาหาร/ครัว").isChecked()) throw new Error(`${name}: food on`);
+  }
+});
+
 await check("viewer without settings.line cannot open the LINE API", async () => {
   const v = await browser.newContext({ ignoreHTTPSErrors: true });
   const p = await v.newPage();
