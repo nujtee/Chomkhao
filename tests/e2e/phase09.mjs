@@ -461,6 +461,47 @@ await check("content admin: no money on dashboard, no payments menu", async () =
   await ctx.close();
 });
 
+await check("Users → Menu access: Super Admin lets the content admin see Payments and takes Gallery away", async () => {
+  await pa.goto(`${BASE}/en/admin/users/content`);
+  const access = pa.getByRole("group", { name: "Menu access" });
+  const seePayments = access.getByRole("checkbox", { name: "See Payments", exact: true });
+  await seePayments.waitFor();
+  if (await seePayments.isChecked()) throw new Error("content admin already sees payments");
+  await seePayments.check();
+  await access.getByRole("checkbox", { name: "See Gallery", exact: true }).uncheck();
+  // "Manage" needs "See": ticking Manage Food orders also ticks See Food orders.
+  await access.getByRole("checkbox", { name: "Manage Food orders", exact: true }).check();
+  if (!(await access.getByRole("checkbox", { name: "See Food orders", exact: true }).isChecked())) throw new Error("manage without see");
+  await pa.screenshot({ path: `${SHOTS}/g-admin-menu-access.png`, fullPage: true });
+  const marked = await access.locator("th", { has: pa.getByText("Set for this user") }).allTextContents();
+  if (marked.length !== 3) throw new Error("badges " + JSON.stringify(marked));
+  await access.getByRole("button", { name: "Save" }).first().click();
+  await pa.getByText("Saved").first().waitFor();
+
+  const ctx = await browser.newContext({ ignoreHTTPSErrors: true, viewport: { width: 1280, height: 800 } });
+  const p = await ctx.newPage(); watch(p);
+  await p.goto(`${BASE}/en/admin/login`);
+  await p.getByLabel("Email or username").fill("content@example.test");
+  await p.locator("input[autocomplete=current-password]").fill("correct horse battery staple");
+  await p.getByRole("button", { name: "Sign in" }).click();
+  await p.waitForURL(`${BASE}/en/admin`);
+  const nav = p.locator("#adm-sidebar nav");
+  await nav.getByRole("button", { name: "Finance" }).click();
+  await nav.getByRole("link", { name: "Payments", exact: true }).click();
+  await p.getByRole("heading", { name: "Payments" }).first().waitFor();
+  await nav.getByRole("button", { name: "Website" }).click();
+  await nav.getByRole("link", { name: "Home" }).waitFor();
+  if (await nav.getByRole("link", { name: "Gallery" }).count()) throw new Error("gallery still in the menu");
+  await ctx.close();
+
+  // Back to the role's defaults.
+  await pa.reload();
+  await access.getByRole("button", { name: "Use the roles for everything" }).click();
+  await access.getByRole("button", { name: "Save" }).first().click();
+  await pa.getByText("Saved").first().waitFor();
+  if (await access.getByText("Set for this user").count()) throw new Error("overrides left");
+});
+
 await check("mobile admin dashboard renders (390px)", async () => {
   const ctx = await browser.newContext({ ignoreHTTPSErrors: true, viewport: { width: 390, height: 844 }, deviceScaleFactor: 2 });
   const p = await ctx.newPage(); watch(p);

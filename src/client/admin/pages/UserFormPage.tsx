@@ -13,6 +13,7 @@ import { LOCALES } from "../../../shared/i18n/locales.ts";
 import { apiGet, apiRequest } from "../../api/client.ts";
 import { Link } from "../../router/Router.tsx";
 import { useAdmin } from "../AdminContext.tsx";
+import { MenuAccessEditor } from "./MenuAccessEditor.tsx";
 import {
   Alert,
   Button,
@@ -244,8 +245,19 @@ export function UserFormPage({ userId }: { userId: string | null }) {
       )}
 
       {!isNew && user && !deleted && !isSelf && can("users.manage_permissions") && catalog.length > 0 && (
-        <div className="adm-card">
-          <h2 className="adm-h2">{t.users.permissionOverrides}</h2>
+        <div className="adm-card" role="group" aria-labelledby="menu-access-h">
+          <h2 className="adm-h2" id="menu-access-h">{t.users.menuAccess}</h2>
+          <p className="adm-muted adm-small">{t.users.menuAccessHint}</p>
+          {[...selectedRoles].sort().join() !== [...user.roles].sort().join() && <Alert kind="info">{t.users.saveRolesFirst}</Alert>}
+          <MenuAccessEditor user={user} roles={roles} overrides={overrides} onChange={setOverrides} />
+          {!user.roles.includes("SUPER_ADMIN") && (
+            <div className="adm-row adm-row--wrap adm-access__actions">
+              <Button onClick={() => void savePermissions()} busy={busy === "permissions"}>{t.common.save}</Button>
+              <Button variant="secondary" disabled={Object.keys(overrides).length === 0} onClick={() => setOverrides({})}>{t.users.resetToRoles}</Button>
+            </div>
+          )}
+          <details className="adm-access__advanced">
+          <summary>{t.users.advanced}</summary>
           <p className="adm-muted adm-small">{t.users.permissionOverridesHint}</p>
           {permissionsByModule.map(([module, perms]) => (
             <fieldset key={module} className="adm-permgroup">
@@ -275,6 +287,7 @@ export function UserFormPage({ userId }: { userId: string | null }) {
             </fieldset>
           ))}
           <Button onClick={() => void savePermissions()} busy={busy === "permissions"}>{t.common.save}</Button>
+          </details>
         </div>
       )}
 

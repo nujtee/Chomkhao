@@ -1871,6 +1871,56 @@
   font-size: 0.875rem;
 }
 
+/* Users → a user → Menu access: a row per menu, "See" and "Manage" ticks. */
+.adm-access tbody th {
+  font-size: 0.9375rem;
+  font-weight: 400;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--color-text);
+}
+
+.adm-access__cell {
+  width: 6rem;
+  text-align: center;
+}
+
+.adm-access__check {
+  width: 22px;
+  height: 22px;
+  accent-color: var(--color-primary);
+  cursor: pointer;
+}
+
+.adm-access__check:disabled {
+  cursor: not-allowed;
+}
+
+.adm-access tbody .adm-access__group th {
+  background: var(--color-background);
+  font-weight: 700;
+  text-align: left;
+  color: var(--color-heading);
+}
+
+.adm-access__custom {
+  margin-left: 8px;
+}
+
+.adm-access__actions {
+  margin: 12px 0;
+}
+
+.adm-access__advanced {
+  margin-top: 8px;
+}
+
+.adm-access__advanced > summary {
+  cursor: pointer;
+  padding: 8px 0;
+  font-weight: 600;
+}
+
 /* Administration → Menu: one card per sidebar group, a tick per item. */
 .adm-menu__grid {
   display: grid;
