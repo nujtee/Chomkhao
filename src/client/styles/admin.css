@@ -2136,6 +2136,19 @@
   align-items: center;
 }
 
+/* Gallery: a category still in draft hides its images from the public page. */
+.adm-gallery-draft {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+}
+
+.adm-gallery-draft p {
+  margin: 0;
+}
+
 /* calendar */
 .adm-calwrap {
   max-height: 70vh;

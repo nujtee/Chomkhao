@@ -283,6 +283,27 @@ await check("gallery category (TH): a slug typed with capitals and spaces is tid
   if (!(cats.data ?? []).some((cat) => cat.slug === "house-01")) throw new Error("not saved as house-01");
 });
 
+await check("gallery (TH): a published image in a draft category is flagged; publishing the category from the images tab shows it on the site", async () => {
+  const cats = (await (await req.get(`${BASE}/api/admin/cms/galleryCategory`)).json()).data;
+  const house = cats.find((x) => x.slug === "house-01");
+  if (!house || house.status !== "DRAFT") throw new Error("house-01 draft category missing");
+  const onSite = async () => (await (await req.get(`${BASE}/api/public/gallery?lang=th`)).json()).data.images.filter((i) => i.categorySlug === "house-01").length;
+  await pa.goto(`${BASE}/th/admin/content-gallery`);
+  await pa.getByText("รูปจะแสดงบนหน้า Gallery เมื่อเผยแพร่ทั้งรูปและหมวดของรูปแล้ว", { exact: false }).waitFor();
+  await pa.locator("label.adm-field--inline", { hasText: "หมวด" }).locator("select").selectOption(house.id);
+  await pa.getByText("หมวด “บ้านพัก” ยังไม่เผยแพร่ — รูปในหมวดนี้ยังไม่แสดงบนหน้าเว็บ แม้รูปจะเผยแพร่แล้ว").waitFor();
+  await pa.locator("input[type=file][multiple]").setInputFiles([`${DIR}/g1.png`]);
+  await pa.locator(".adm-cmsitem").first().waitFor({ timeout: 10000 });
+  await pa.locator(".adm-cmsitem").first().getByRole("button", { name: "เผยแพร่", exact: true }).click();
+  await pa.getByText("บ้านพัก · ปกติ · หมวดยังไม่เผยแพร่ จึงยังไม่แสดงบนเว็บ").waitFor();
+  if ((await onSite()) !== 0) throw new Error("image of a draft category on the site");
+  await pa.getByRole("button", { name: "เผยแพร่หมวด “บ้านพัก”" }).click();
+  await pa.getByText(/^เผยแพร่หมวด “บ้านพัก” แล้ว/).waitFor();
+  await pa.getByText("บ้านพัก · ปกติ", { exact: true }).waitFor();
+  if ((await onSite()) !== 1) throw new Error("image not on the site after publishing its category");
+  await pa.screenshot({ path: `${SHOTS}/g-admin-gallery-category-published.png`, fullPage: true });
+});
+
 await check("branding: upload logo → public header shows it", async () => {
   await pa.goto(`${BASE}/en/admin/settings-branding`);
   await pa.locator("input[type=file]").first().setInputFiles(`${DIR}/logo.png`);
