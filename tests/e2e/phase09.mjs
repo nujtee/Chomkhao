@@ -111,6 +111,54 @@ await check("a future stay: Check in / No-show shown but not pressable before th
   await stay.getByText(/can be pressed from the arrival day/).waitFor();
 });
 
+await check("change dates: a calendar where only green days can be picked; the move keeps nights and price and moves the meal", async () => {
+  const F = await book(req, { checkIn: day(10), checkOut: day(12), stay: { kind: "UNIT", unitId: "dev_house_02" }, food: [{ optionId: "dev_food_dinner_a", serviceDate: day(10), adults: 2 }] }, "0866666666");
+  await book(req, { checkIn: day(14), checkOut: day(15), stay: { kind: "UNIT", unitId: "dev_house_02" } }, "0877777777"); // someone else on day 14
+  await pa.goto(`${BASE}/en/admin/bookings/${F.bookingCode}`);
+  await pa.getByRole("button", { name: "Change dates" }).click();
+  const cal = pa.getByRole("group", { name: "Change dates" });
+  const cell = (d) => cal.locator(`button[data-date="${d}"]`);
+  const show = async (d) => {
+    await cal.locator(".adm-move__grid").waitFor();
+    if (!(await cell(d).count())) await cal.getByRole("button", { name: /^Next:/ }).click();
+    await cell(d).waitFor();
+  };
+  await show(day(10));
+  if ((await cell(day(10)).getAttribute("data-state")) !== "CURRENT" || !(await cell(day(10)).isDisabled())) throw new Error("current check-in day pickable");
+  await show(day(14));
+  const red = cell(day(14));
+  if ((await red.getAttribute("data-state")) !== "TAKEN" || !(await red.isDisabled())) throw new Error("taken day pickable");
+  if (!/adm-move__day--taken/.test(await red.getAttribute("class"))) throw new Error("taken day not red");
+  await cal.getByText("No day picked yet").waitFor();
+  await show(day(16));
+  const green = cell(day(16));
+  if ((await green.getAttribute("data-state")) !== "OK" || (await green.isDisabled())) throw new Error("free day not pickable");
+  if (!/adm-move__day--ok/.test(await green.getAttribute("class"))) throw new Error("free day not green");
+  await green.click();
+  if ((await green.getAttribute("aria-pressed")) !== "true") throw new Error("not picked");
+  await cal.getByText(/^New stay: .* \(2 nights\)$/).waitFor();
+  await pa.screenshot({ path: `${SHOTS}/g-admin-move-dates.png`, fullPage: true });
+  await cal.getByRole("button", { name: "Move to these dates" }).click();
+  await pa.locator("dialog[open]").getByRole("button", { name: "Move to these dates" }).click();
+  await pa.getByText(/^Dates changed: /).waitFor();
+  const after = (await (await req.get(`${BASE}/api/admin/bookings/${F.bookingCode}`)).json()).data;
+  if (after.checkIn !== day(16) || after.checkOut !== day(18) || after.nights !== 2) throw new Error(`dates ${after.checkIn} → ${after.checkOut}`);
+  if (after.totalSatang !== F.totalSatang) throw new Error("price changed");
+  if (after.food.map((f) => f.serviceDate).join() !== day(16)) throw new Error(`meal ${after.food.map((f) => f.serviceDate)}`);
+  await pa.getByText("Prices as booked, for the original dates. The dates changed; the price did not.").waitFor();
+  // Its old nights are free again: another guest can book day 10.
+  await book(req, { checkIn: day(10), checkOut: day(11), stay: { kind: "UNIT", unitId: "dev_house_02" } }, "0888888888");
+  // Thai, on a phone: the calendar fits the screen.
+  await pa.setViewportSize({ width: 390, height: 844 });
+  await pa.goto(`${BASE}/th/admin/bookings/${F.bookingCode}`);
+  await pa.getByRole("button", { name: "เปลี่ยนวันเข้าพัก" }).click();
+  await pa.locator(".adm-move__grid").waitFor();
+  const grid = await pa.locator(".adm-move__grid").boundingBox();
+  if (grid.x < 0 || grid.x + grid.width > 390) throw new Error(`calendar off screen ${JSON.stringify(grid)}`);
+  await pa.locator(".adm-move").screenshot({ path: `${SHOTS}/g-admin-move-dates-th-mobile.png` });
+  await pa.setViewportSize({ width: 1440, height: 900 });
+});
+
 await check("dashboard arrivals: check in straight from the list; bookings list: check out from the row", async () => {
   await pa.goto(`${BASE}/en/admin`);
   await pa.getByRole("button", { name: `Check in ${C.bookingCode}` }).click();

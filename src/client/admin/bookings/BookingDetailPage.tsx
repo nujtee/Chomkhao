@@ -9,6 +9,7 @@ import { useAdmin } from "../AdminContext.tsx";
 import { Alert, Button, ConfirmDialog, detailMessage, errorMessage, useDateFormatter } from "../ui.tsx";
 import { PaymentPanel } from "../payments/PaymentPanel.tsx";
 import { BookingStatusBadge, useStayDate } from "./shared.tsx";
+import { MoveDates } from "./MoveDates.tsx";
 import { StayButtons } from "./StayButtons.tsx";
 
 export function BookingDetailPage({ code }: { code: string }) {
@@ -61,6 +62,9 @@ export function BookingDetailPage({ code }: { code: string }) {
   if (!b) return <section>{back}{error ? <Alert kind="error">{error}</Alert> : <p role="status">{t.common.loading}</p>}</section>;
 
   const cancellable = (b.status === "PENDING" || b.status === "CONFIRMED") && can("bookings.cancel");
+  const movable = (b.status === "PENDING" || b.status === "CONFIRMED") && can("bookings.edit");
+  /** Snapshots keep the nights as booked: after a date change their dates are the original ones. */
+  const moved = b.item.nightly.length > 0 && b.item.nightly[0]!.date !== b.checkIn;
   const extraFood = b.food.filter((f) => f.includedQuantity === 0);
   const includedFood = b.food.filter((f) => f.includedQuantity > 0);
 
@@ -95,6 +99,7 @@ export function BookingDetailPage({ code }: { code: string }) {
             <dt>{t.bk.created}</dt><dd>{dateTime(b.createdAt)} · {b.source} · {b.languageCode}</dd>
             {b.cancelledAt && <><dt>{t.bk.cancelledAt}</dt><dd>{dateTime(b.cancelledAt)}</dd><dt>{t.bk.cancelReason}</dt><dd>{b.cancelReason}</dd></>}
           </dl>
+          {movable && <MoveDates key={`${b.checkIn}|${b.status}`} booking={b} onMoved={stayChanged} />}
         </div>
         <div className="adm-card">
           <h2 className="adm-h2">{t.bk.customer}</h2>
@@ -112,6 +117,7 @@ export function BookingDetailPage({ code }: { code: string }) {
 
       <div className="adm-card">
         <h2 className="adm-h2">{t.bk.nightly}</h2>
+        {moved && <p className="adm-field__hint">{t.bk.nightlyMoved}</p>}
         <div className="adm-tablewrap">
           <table className="adm-table">
             <tbody>

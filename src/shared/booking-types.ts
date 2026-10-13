@@ -163,6 +163,26 @@ export interface AdminBookingSummaryDto {
   stayActions: StayActionsDto;
 }
 
+/**
+ * Admin → booking → Change dates: which new check-in days work for this stay (same number of nights).
+ *   OK         every night is free (and the tents / tarp / food capacity fits)
+ *   CURRENT    the booking's own check-in day
+ *   TAKEN      a night is booked or blocked, or camping is full
+ *   TARP_FULL  no tarp area left on a night (camping add-on)
+ *   FOOD_FULL  a meal of the booking is sold out on its new day
+ *   PAST       before today · TOO_FAR more than two years ahead
+ */
+export type MoveDayState = "OK" | "CURRENT" | "TAKEN" | "TARP_FULL" | "FOOD_FULL" | "PAST" | "TOO_FAR";
+
+export interface BookingMoveOptionsDto {
+  checkIn: string;
+  checkOut: string;
+  nights: number;
+  /** Today in the property time zone. */
+  today: string;
+  days: { date: string; state: MoveDayState }[];
+}
+
 export interface AdminBookingDto extends PublicBookingDto {
   id: string;
   source: string;

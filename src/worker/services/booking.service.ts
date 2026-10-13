@@ -8,9 +8,11 @@ import type {
   PublicBookingDto,
   QuoteDto,
 } from "../../shared/booking-types.ts";
-import { BOOKING_CODE_PATTERN, maskPhone, normalizePhone } from "../../shared/booking-types.ts";
+import { BOOKING_CODE_PATTERN, maskPhone, normalizePhone, type BookingMoveOptionsDto, type MoveDayState } from "../../shared/booking-types.ts";
 import type { BookingSettingsDto, StayAction } from "../../shared/dashboard-types.ts";
-import { todayIn } from "../../shared/dates.ts";
+import { addDays, diffDays, stayNights, todayIn } from "../../shared/dates.ts";
+import { BookingMoveRepository, KITCHEN_STARTED } from "../repositories/booking-move.repository.ts";
+import { moveDayState, type MoveInputs } from "./booking-move.ts";
 import { stayActions } from "../../shared/stay.ts";
 import type { D1DatabaseLike, D1PreparedStatementLike } from "../env.ts";
 import { ConflictError, HttpError, NotFoundError, TooManyRequestsError, ValidationError } from "../http/errors.ts";
@@ -477,6 +479,135 @@ export class BookingService {
         { ...before, updatedAt: undefined }, input, meta),
     ]);
     return this.getSettings(actor, meta);
+  }
+
+  // ================================================================ admin: change the stay dates
+
+  private get moves(): BookingMoveRepository {
+    return new BookingMoveRepository(this.db);
+  }
+
+  /** A stay that may move: still to come or waiting for payment, nothing cooked yet. */
+  private async movable(row: BookingRow) {
+    if (row.booking_status !== "PENDING" && row.booking_status !== "CONFIRMED") {
+      throw new ConflictError("Only bookings waiting for payment or confirmed can change dates", "BOOKING_STATUS_INVALID");
+    }
+    const [items, orders, tarp] = await Promise.all([this.repo.items(row.id), this.moves.foodOrders(row.id), this.repo.tarp(row.id)]);
+    if (orders.some((o) => (KITCHEN_STARTED as readonly string[]).includes(o.status))) {
+      throw new ConflictError("The kitchen has started on a meal of this booking", "KITCHEN_STARTED");
+    }
+    const item = items.find((i) => i.status === "ACTIVE");
+    if (!item) throw new ConflictError("This booking has nothing to move", "BOOKING_STATUS_INVALID");
+    return { item, orders: orders.filter((o) => o.status !== "CANCELLED" && o.capacity_reserved > 0), tarps: tarp?.status === "ACTIVE" ? tarp.quantity : 0 };
+  }
+
+  /** Everything the day check needs for new check-in days in [from, to), read once. */
+  private async moveInputs(row: BookingRow, today: string, from: string, to: string): Promise<{ inputs: MoveInputs; plan: Awaited<ReturnType<BookingService["movable"]>> }> {
+    const plan = await this.movable(row);
+    const until = addDays(to, row.nights);
+    const own = new Set(stayNights(row.check_in, row.check_out));
+    let unitTaken: Set<string> | null = null;
+    let tents: MoveInputs["tents"] = null;
+    let tarps: MoveInputs["tarps"] = null;
+    if (plan.item.unit_id) {
+      unitTaken = await this.moves.unitTaken(plan.item.unit_id, row.id, from, until);
+    } else {
+      const [settings, nights, tarpNights] = await Promise.all([
+        this.moves.campingSettings(), this.moves.campingNights(from, until),
+        plan.tarps > 0 ? this.moves.tarpNights(from, until) : Promise.resolve([]),
+      ]);
+      const byDate = new Map(nights.map((n) => [n.stay_date, n]));
+      const tarpByDate = new Map(tarpNights.map((n) => [n.stay_date, n]));
+      const need = plan.item.quantity;
+      tents = {
+        need,
+        free: (d) => (settings?.is_enabled !== 1 ? 0
+          : (byDate.get(d)?.max_tents ?? settings.max_tents_per_night) - (byDate.get(d)?.tents_used ?? 0) + (own.has(d) ? need : 0)),
+      };
+      if (plan.tarps > 0) {
+        tarps = {
+          need: plan.tarps,
+          free: (d) => (tarpByDate.get(d)?.max_tarps ?? settings?.max_tarps_per_night ?? 0) - (tarpByDate.get(d)?.tarps_used ?? 0) + (own.has(d) ? plan.tarps : 0),
+        };
+      }
+    }
+    const food = plan.orders.map((o) => ({ offset: diffDays(row.check_in, o.service_date), categoryId: o.food_category_id, need: o.capacity_reserved }));
+    const offsets = food.map((f) => f.offset);
+    const capacity = await this.moves.foodCapacity(
+      [...new Set(food.map((f) => f.categoryId))],
+      addDays(from, Math.min(0, ...offsets)), addDays(to, Math.max(0, ...offsets) + 1),
+    );
+    const capKey = (c: string, d: string) => `${c}|${d}`;
+    const capByKey = new Map(capacity.map((c) => [capKey(c.food_category_id, c.service_date), c]));
+    const ownFood = new Map(plan.orders.map((o) => [capKey(o.food_category_id, o.service_date), o.capacity_reserved]));
+    const defaults = new Map(plan.orders.map((o) => [o.food_category_id, o.default_daily_capacity]));
+    const foodFree = (c: string, d: string) => {
+      const cap = capByKey.get(capKey(c, d));
+      const max = cap ? cap.max_quantity : defaults.get(c) ?? null;
+      return max === null ? Number.POSITIVE_INFINITY : max - (cap?.used_quantity ?? 0) + (ownFood.get(capKey(c, d)) ?? 0);
+    };
+    return { inputs: { checkIn: row.check_in, nights: row.nights, today, unitTaken, tents, tarps, food, foodFree }, plan };
+  }
+
+  /** The calendar: for each day in [from, from + days), could the stay start there (same nights)? */
+  async moveOptions(actor: AuthContext, code: string, from: string, days: number, meta: RequestMeta): Promise<BookingMoveOptionsDto> {
+    await this.authz.requirePermission(actor, "bookings.edit", meta);
+    const row = await this.expireIfDue(await this.findOr404(code));
+    const today = todayIn(await this.quotes.timezone(), this.clock());
+    const { inputs } = await this.moveInputs(row, today, from, addDays(from, days));
+    return {
+      checkIn: row.check_in, checkOut: row.check_out, nights: row.nights, today,
+      days: Array.from({ length: days }, (_, i) => addDays(from, i)).map((date) => ({ date, state: moveDayState(date, inputs) })),
+    };
+  }
+
+  /**
+   * Moves the stay to start on `checkIn` (same number of nights). One D1 batch: dates, night locks or tent / tarp
+   * counters, meals and their kitchen capacity — the database refuses anything that no longer fits. The price
+   * the guest booked at stays (snapshots are never re-priced).
+   */
+  async moveDates(actor: AuthContext, code: string, checkIn: string, meta: RequestMeta) {
+    await this.authz.requirePermission(actor, "bookings.edit", meta);
+    const row = await this.expireIfDue(await this.findOr404(code));
+    const today = todayIn(await this.quotes.timezone(), this.clock());
+    const { inputs, plan } = await this.moveInputs(row, today, checkIn, addDays(checkIn, 1));
+    const refused: Partial<Record<MoveDayState, [number, string, string]>> = {
+      CURRENT: [422, "SAME_DATES", "The booking already starts on that day"],
+      PAST: [422, "DATE_IN_PAST", "That day has passed"],
+      TOO_FAR: [422, "DATE_TOO_FAR", "That day is too far ahead"],
+      TAKEN: [409, "DATES_UNAVAILABLE", "Those nights are not free"],
+      TARP_FULL: [409, "TARP_FULL", "No tarp area is left on those nights"],
+      FOOD_FULL: [409, "FOOD_UNAVAILABLE", "A meal of this booking is sold out on its new day"],
+    };
+    const no = refused[moveDayState(checkIn, inputs)];
+    if (no) throw new HttpError(no[0], no[1], no[2]);
+
+    const checkOut = addDays(checkIn, row.nights);
+    const now = iso(this.clock());
+    let results;
+    try {
+      results = await this.db.batch(this.moves.moveStatements({
+        bookingId: row.id,
+        from: { checkIn: row.check_in, checkOut: row.check_out },
+        to: { checkIn, checkOut },
+        offset: diffDays(row.check_in, checkIn),
+        unit: plan.item.unit_id ? { unitId: plan.item.unit_id, itemId: plan.item.id } : null,
+        tents: plan.item.unit_id ? 0 : plan.item.quantity,
+        tarps: plan.tarps,
+        now,
+      }));
+    } catch (error) {
+      // Taken between the calendar and the click: the whole batch rolled back, nothing moved.
+      const text = String(error);
+      if (/booking_unit_nights|tents_used/.test(text)) throw new ConflictError("Those nights are not free", "DATES_UNAVAILABLE");
+      if (/tarps_used/.test(text)) throw new ConflictError("No tarp area is left on those nights", "TARP_FULL");
+      if (/used_quantity/.test(text)) throw new ConflictError("A meal of this booking is sold out on its new day", "FOOD_UNAVAILABLE");
+      throw error;
+    }
+    if (!results[0]?.results.length) throw new ConflictError("The booking changed meanwhile, please reload", "BOOKING_CHANGED");
+    await this.log.auditStatement(actor.userId, "MOVE_BOOKING", "bookings", row.id,
+      { checkIn: row.check_in, checkOut: row.check_out }, { checkIn, checkOut }, meta).run();
+    return this.toAdmin((await this.repo.findByCode(row.booking_code))!);
   }
 
   private async findOr404(code: string): Promise<BookingRow> {

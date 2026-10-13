@@ -16,6 +16,11 @@
     "table",
     "vals.length"
   ],
+  "src/worker/repositories/booking-move.repository.ts": [
+    "holdsCapacity",
+    "moved",
+    "ownOrder"
+  ],
   "src/worker/repositories/booking.repository.ts": [
     "ended"
   ],

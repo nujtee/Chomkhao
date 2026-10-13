@@ -204,6 +204,26 @@ export function bookingController(services: ServicesFor) {
     get: withAuth(services, async (ctx, auth) =>
       jsonOk(await services(ctx).bookings.adminGet(auth, codeParam(ctx), requestMeta(ctx)), { headers: NO_STORE })),
 
+    /** GET /api/admin/bookings/:code/move-options?from=YYYY-MM-DD&days=42 — which new check-in days work. */
+    moveOptions: withPermission("bookings.edit", services, async (ctx, auth) => {
+      const q = ctx.url.searchParams;
+      const v = new Validator(Object.fromEntries(q.entries())).allowOnly(["from", "days"]);
+      const from = date(v, q.get("from") ?? undefined, "from");
+      const days = Number(q.get("days") ?? 42);
+      if (!Number.isInteger(days) || days < 1 || days > 62) v.errors.days = "OUT_OF_RANGE";
+      v.assertValid();
+      return jsonOk(await services(ctx).bookings.moveOptions(auth, codeParam(ctx), from, days, requestMeta(ctx)), { headers: NO_STORE });
+    }),
+
+    /** POST /api/admin/bookings/:code/move { checkIn } — same number of nights, same price. */
+    move: withPermission("bookings.edit", services, async (ctx, auth) => {
+      const body = await readJsonObject(ctx.request);
+      const v = new Validator(body).allowOnly(["checkIn"]);
+      const checkIn = date(v, body.checkIn, "checkIn");
+      v.assertValid();
+      return jsonOk(await services(ctx).bookings.moveDates(auth, codeParam(ctx), checkIn, requestMeta(ctx)), { headers: NO_STORE });
+    }),
+
     cancel: withPermission("bookings.cancel", services, async (ctx, auth) => {
       const v = new Validator(await readJsonObject(ctx.request)).allowOnly(["reason"]);
       const reason = v.string("reason", { required: true, min: 3, max: 500 });

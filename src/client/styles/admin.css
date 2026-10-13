@@ -1871,6 +1871,178 @@
   font-size: 0.875rem;
 }
 
+/* Booking page → Stay → Change dates: a month of possible new check-in days. Green = can start there,
+   red (struck through) = cannot, grey = past / too far; dashed outline = the current stay. */
+.adm-move__open {
+  margin-top: 12px;
+}
+
+.adm-move {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--color-border);
+}
+
+.adm-move__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.adm-move__title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--color-heading);
+}
+
+.adm-move__title:focus {
+  outline: none;
+}
+
+.adm-move__nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 420px;
+  margin: 12px 0 4px;
+}
+
+.adm-move__month {
+  flex: 1;
+  margin: 0;
+  font-weight: 600;
+  text-align: center;
+}
+
+.adm-move__loading {
+  min-height: 120px;
+}
+
+.adm-move__grid {
+  width: 100%;
+  max-width: 420px;
+  border-collapse: separate;
+  border-spacing: 4px;
+  table-layout: fixed;
+}
+
+.adm-move__grid th {
+  padding: 2px 0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-muted);
+  text-align: center;
+}
+
+.adm-move__grid td {
+  padding: 0;
+}
+
+.adm-move__day {
+  display: block;
+  width: 100%;
+  min-height: 40px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-heading);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+}
+
+.adm-move__swatch {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+}
+
+.adm-move__day:disabled {
+  cursor: not-allowed;
+}
+
+.adm-move__day:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.adm-move__day--ok {
+  background: color-mix(in srgb, var(--color-success) 16%, var(--color-surface));
+  border-color: color-mix(in srgb, var(--color-success) 55%, transparent);
+  cursor: pointer;
+}
+
+.adm-move__day--ok:hover:not(:disabled):not(.adm-move__day--picked) {
+  background: color-mix(in srgb, var(--color-success) 32%, var(--color-surface));
+}
+
+.adm-move__day--taken {
+  background: color-mix(in srgb, var(--color-error) 14%, var(--color-surface));
+  border-color: color-mix(in srgb, var(--color-error) 50%, transparent);
+  color: var(--color-error);
+  text-decoration: line-through;
+}
+
+.adm-move__day--off {
+  background: color-mix(in srgb, var(--color-muted) 8%, transparent);
+  color: color-mix(in srgb, var(--color-muted) 70%, transparent);
+}
+
+.adm-move__day--current {
+  background: var(--color-surface);
+  font-weight: 700;
+}
+
+.adm-move__day--was {
+  border: 2px dashed var(--color-heading);
+}
+
+/* The nights of the picked new stay. */
+.adm-move__day--new {
+  background: color-mix(in srgb, var(--color-success) 42%, var(--color-surface));
+  border-color: var(--color-success);
+  color: var(--color-heading);
+  text-decoration: none;
+}
+
+.adm-move__day--picked {
+  background: var(--color-success);
+  border-color: var(--color-success);
+  color: var(--color-primary-contrast);
+  font-weight: 700;
+}
+
+.adm-move__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.8125rem;
+  color: var(--color-muted);
+}
+
+.adm-move__legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.adm-move__summary {
+  margin: 12px 0 4px;
+  font-weight: 600;
+  color: var(--color-heading);
+}
+
+.adm-move .adm-field__error {
+  margin: 0 0 8px;
+}
+
 /* Users → a user → Menu access: a row per menu, "See" and "Manage" ticks. */
 .adm-access tbody th {
   font-size: 0.9375rem;
