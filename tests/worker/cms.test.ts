@@ -103,13 +103,32 @@ describe("home hero slides (spec §9)", () => {
 });
 
 describe("gallery CMS (spec §10)", () => {
+  it("slugs are tidied, not refused, for capitals, spaces, _ , dash look-alikes and invisible characters", async () => {
+    const h = new Harness({ seed: true });
+    const editor = await staff(h, ["content.view", "content.gallery"]);
+    const make = (slug: string) => api(h, "POST", "galleryCategory", editor, { slug, sortOrder: 1, translations: { th: { name: "บ้านพัก" } } });
+    const first = await make(" House 01 ");
+    assert.equal(first.status, 201, JSON.stringify(first.body));
+    assert.equal(first.data.slug, "house-01");
+    // The same slug typed differently is the same slug: taken.
+    for (const same of ["house-01 ", "HOUSE_01", "house\u201301", "house\u200b-01", "house--01", "-house-01-", "ｈｏｕｓｅ-01"]) {
+      const r = await make(same);
+      assert.deepEqual([r.status, r.error?.details?.slug], [409, "TAKEN"], same);
+    }
+    for (const bad of ["บ้าน-01", "house/01", "house.01"]) assert.equal((await make(bad)).error?.details?.slug, "SLUG_FORMAT", bad);
+    assert.equal((await make("  ")).error?.details?.slug, "REQUIRED");
+    const edited = await api(h, "PATCH", `galleryCategory/${first.data.id}`, editor, { slug: "Rooms And Views" });
+    assert.equal(edited.status, 200, JSON.stringify(edited.body));
+    assert.equal(edited.data.slug, "rooms-and-views");
+  });
+
   it("shows only published images of published categories; categories need a Thai name", async () => {
     const h = new Harness({ seed: true });
     const editor = await staff(h, ["content.view", "content.gallery", "content.publish"]);
     const noName = await api(h, "POST", "galleryCategory", editor, { slug: "food", translations: { en: { name: "Food" } } });
     assert.equal(noName.error?.details?.["translations.th.name"], "REQUIRED");
-    const badSlug = await api(h, "POST", "galleryCategory", editor, { slug: "Food Pics", translations: { th: { name: "อาหาร" } } });
-    assert.equal(badSlug.error?.details?.slug, "INVALID_FORMAT");
+    const badSlug = await api(h, "POST", "galleryCategory", editor, { slug: "อาหาร", translations: { th: { name: "อาหาร" } } });
+    assert.equal(badSlug.error?.details?.slug, "SLUG_FORMAT");
     const dupe = await api(h, "POST", "galleryCategory", editor, { slug: "nature", translations: { th: { name: "ซ้ำ" } } });
     assert.equal(dupe.status, 409);
     assert.equal(dupe.error?.details?.slug, "TAKEN");

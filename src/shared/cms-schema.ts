@@ -307,6 +307,22 @@ export function normalizeCode(raw: string): string {
   return raw.trim().toUpperCase().replace(/[\s-]+/g, "_");
 }
 
+/**
+ * A slug as it is being typed: letters lower case, spaces / _ / dash look-alikes become "-", invisible characters
+ * (zero-width spaces from copy and paste) go. Full-width letters become plain ones (NFKC).
+ */
+export function typingSlug(raw: string): string {
+  return raw.normalize("NFKC").replace(/[\u200b-\u200d\u2060\ufeff]/g, "").trimStart().toLowerCase().replace(/[\s_\u2010-\u2015\u2212]+/g, "-");
+}
+
+/**
+ * Typed slug tidied the same way in the form (on leaving the field) and on the server: " House 01 " → "house-01".
+ * Other characters (Thai letters, punctuation) stay, and are refused with SLUG_FORMAT.
+ */
+export function normalizeSlug(raw: string): string {
+  return typingSlug(raw.trim()).replace(/-{2,}/g, "-").replace(/^-+|-+$/g, "");
+}
+
 /** Link: same-site path or an https URL. */
 export function isSafeLink(value: string): boolean {
   if (CMS_TEXT.path.test(value)) return !value.includes("//") && !value.includes("\\");

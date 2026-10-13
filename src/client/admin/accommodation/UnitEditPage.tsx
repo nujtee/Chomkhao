@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from 
 import type { AdminUnitDto, AmenityDto, MediaTextDto, UnitTranslationDto, UnitType } from "../../../shared/accommodation-types.ts";
 import { SATANG_PER_BAHT, parseBahtToSatang } from "../../../shared/booking-rules.ts";
 import { LOCALES, type LocaleCode } from "../../../shared/i18n/locales.ts";
+import { normalizeSlug } from "../../../shared/cms-schema.ts";
 import { ApiError, apiGet, apiRequest } from "../../api/client.ts";
 import { format } from "../../../shared/i18n/admin-messages.ts";
 import { uploadImage } from "../../media/prepareImage.ts";
@@ -99,7 +100,7 @@ function BasicsForm({ type, unit, canEdit, onCreated, onSaved, onError }: {
     }
     const body: Record<string, unknown> = {
       unitCode: f.unitCode.trim().toUpperCase(),
-      slug: f.slug.trim().toLowerCase(),
+      slug: normalizeSlug(f.slug),
       standardGuests: Number(f.standardGuests),
       maxGuests: Number(f.maxGuests),
       maxAdults: f.maxAdults ? Number(f.maxAdults) : null,

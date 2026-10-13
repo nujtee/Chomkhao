@@ -263,6 +263,26 @@ await check("gallery: multi-upload two images, publish one", async () => {
   await pa.screenshot({ path: `${SHOTS}/g-admin-gallery.png`, fullPage: true });
 });
 
+await check("gallery category (TH): a slug typed with capitals and spaces is tidied to house-01; Thai is explained", async () => {
+  await pa.goto(`${BASE}/th/admin/content-gallery`);
+  await pa.getByRole("tab", { name: "หมวด", exact: true }).click();
+  await pa.getByRole("button", { name: "+ เพิ่มหมวด" }).click();
+  const slug = pa.getByLabel("Slug (ภาษาอังกฤษตัวเล็ก ตัวเลข และ -)");
+  await pa.getByText("เช่น house-01 · เว้นวรรคจะเปลี่ยนเป็น - และตัวพิมพ์ใหญ่เป็นตัวเล็กให้อัตโนมัติ").waitFor();
+  await slug.fill("บ้านพัก");
+  await pa.getByLabel("ชื่อ").first().fill("บ้านพัก");
+  await pa.getByRole("button", { name: "บันทึก" }).first().click();
+  await pa.locator(".adm-field__error", { hasText: "Slug ใช้ได้เฉพาะตัวอักษรภาษาอังกฤษ a–z ตัวเลข 0–9 และขีด -" }).waitFor();
+  await slug.fill("");
+  await slug.pressSequentially(" House 01 ");
+  await slug.blur();
+  if ((await slug.inputValue()) !== "house-01") throw new Error(`slug shown as ${JSON.stringify(await slug.inputValue())}`);
+  await pa.getByRole("button", { name: "บันทึก" }).first().click();
+  await pa.getByText("/house-01").waitFor();
+  const cats = await (await req.get(`${BASE}/api/admin/cms/galleryCategory`)).json();
+  if (!(cats.data ?? []).some((cat) => cat.slug === "house-01")) throw new Error("not saved as house-01");
+});
+
 await check("branding: upload logo → public header shows it", async () => {
   await pa.goto(`${BASE}/en/admin/settings-branding`);
   await pa.locator("input[type=file]").first().setInputFiles(`${DIR}/logo.png`);

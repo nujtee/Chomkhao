@@ -1,5 +1,5 @@
 import type { CmsEntityName, CmsRecord, EntityDef, FieldDef } from "../../shared/cms-schema.ts";
-import { CMS_TEXT, ENTITIES, isSafeLink, isSafePath, normalizeCode } from "../../shared/cms-schema.ts";
+import { CMS_TEXT, ENTITIES, isSafeLink, isSafePath, normalizeCode, normalizeSlug } from "../../shared/cms-schema.ts";
 import { MAX_PRICE_SATANG } from "../../shared/booking-rules.ts";
 import { DEFAULT_LOCALE_CODE, LOCALE_CODES, type LocaleCode } from "../../shared/i18n/locales.ts";
 import type { D1DatabaseLike, D1PreparedStatementLike } from "../env.ts";
@@ -573,8 +573,12 @@ function parseValue(f: FieldDef, raw: unknown): Parsed {
       return typeof raw === "string" && CMS_TEXT.color.test(raw) ? raw.toLowerCase() : { error: "INVALID_FORMAT" };
     case "time":
       return typeof raw === "string" && CMS_TEXT.time.test(raw) ? raw : { error: "INVALID_FORMAT" };
-    case "slug":
-      return typeof raw === "string" && CMS_TEXT.slug.test(raw) && (f.max === undefined || raw.length <= f.max) ? raw : { error: "INVALID_FORMAT" };
+    case "slug": {
+      if (typeof raw !== "string") return { error: "EXPECTED_STRING" };
+      const v = normalizeSlug(raw);
+      if (v === "") return f.required ? { error: "REQUIRED" } : null;
+      return CMS_TEXT.slug.test(v) && (f.max === undefined || v.length <= f.max) ? v : { error: "SLUG_FORMAT" };
+    }
     case "code": {
       if (typeof raw !== "string") return { error: "EXPECTED_STRING" };
       const v = normalizeCode(raw);

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from "react";
 import type { PermissionCode } from "../../../shared/auth-types.ts";
 import { formatBaht, parseBahtToSatang } from "../../../shared/booking-rules.ts";
-import { ENTITIES, type CmsEntityName, type CmsRecord, type FieldDef } from "../../../shared/cms-schema.ts";
+import { ENTITIES, normalizeSlug, typingSlug, type CmsEntityName, type CmsRecord, type FieldDef } from "../../../shared/cms-schema.ts";
 import { format } from "../../../shared/i18n/admin-messages.ts";
 import type { AdminCmsMessages } from "../../../shared/i18n/admin-cms-messages.ts";
 import { LOCALES, type LocaleCode } from "../../../shared/i18n/locales.ts";
@@ -285,13 +285,20 @@ export function CmsForm({
       control = (
         <input {...common} type={type} inputMode={f.kind === "money" ? "decimal" : undefined} value={values[f.key] || (f.kind === "color" ? "#000000" : "")}
           min={f.kind === "int" ? f.min : undefined} max={f.kind === "int" ? f.max : undefined}
-          maxLength={f.kind === "code" ? f.max : undefined} autoCapitalize={f.kind === "code" ? "characters" : undefined}
-          spellCheck={f.kind === "code" ? false : undefined}
-          // Codes are upper case with _ between words; typed as "dinner set" they read "DINNER_SET".
-          onChange={(e) => set(f.key, f.kind === "code" ? e.currentTarget.value.toUpperCase().replace(/[\s-]+/g, "_") : e.currentTarget.value)} />
+          maxLength={f.kind === "code" || f.kind === "slug" ? f.max : undefined}
+          autoCapitalize={f.kind === "code" ? "characters" : f.kind === "slug" ? "none" : undefined}
+          spellCheck={f.kind === "code" || f.kind === "slug" ? false : undefined}
+          autoComplete={f.kind === "slug" ? "off" : undefined}
+          // Codes are upper case with _ between words ("dinner set" reads "DINNER_SET"); slugs lower case with
+          // - between words ("House 01" reads "house-01"), tidied at the edges when the field is left.
+          onChange={(e) => {
+            const v = e.currentTarget.value;
+            set(f.key, f.kind === "code" ? v.toUpperCase().replace(/[\s-]+/g, "_") : f.kind === "slug" ? typingSlug(v) : v);
+          }}
+          onBlur={f.kind === "slug" ? (e) => set(f.key, normalizeSlug(e.currentTarget.value)) : undefined} />
       );
     }
-    const hint = f.kind === "link" ? c.hints.link : f.kind === "datetime" ? c.hints.datetime
+    const hint = f.kind === "link" ? c.hints.link : f.kind === "datetime" ? c.hints.datetime : f.kind === "slug" ? c.hints.slug
       : f.kind === "code" && !record ? (f.lettersOnly ? c.hints.codeLetters : c.hints.code) : undefined;
     return (
       <div key={f.key} className="adm-field">
