@@ -449,6 +449,9 @@ await check("camping: owner offers a tarp area; a guest books dates, 2 adults + 
   await p.getByRole("columnheader", { name: /Tarp/ }).waitFor();
   await p.close();
 
+  // Someone already has 3 tents on the second night.
+  await book(req, { checkIn: day(21), checkOut: day(22), adults: 3, stay: { kind: "CAMPING", tents: 3 } }, "0812121212");
+
   // Guest (TH, 390 px): the camping card has its own form.
   const ctx = await browser.newContext({ ignoreHTTPSErrors: true, viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, locale: "th-TH" });
   const g = await ctx.newPage(); watch(g);
@@ -457,6 +460,15 @@ await check("camping: owner offers a tarp area; a guest books dates, 2 adults + 
   await form.waitFor();
   await form.getByLabel("เช็คอิน").fill(day(20));
   await form.getByLabel("เช็คเอาท์").fill(day(22));
+  // Spots left show as soon as the dates are set: the fewest over the nights, and each night when they differ.
+  await form.getByText("เหลือพื้นที่กางเต็นท์อีก 27 ที่ ในวันที่เลือก").waitFor();
+  await form.getByText(/เหลือ 30 ที่ · .* เหลือ 27 ที่$/).waitFor();
+  await form.getByText("เหลือ 2 พื้นที่ในวันที่เลือก").waitFor();
+  await form.getByLabel("เช็คอิน").fill(day(21));
+  await form.getByText("เหลือพื้นที่กางเต็นท์อีก 27 ที่ ในวันที่เลือก").waitFor();
+  if (await form.getByText(/ เหลือ 30 ที่/).count()) throw new Error("one night: no per-night list");
+  await form.getByLabel("เช็คอิน").fill(day(20));
+  await form.getByText(/เหลือ 30 ที่ · .* เหลือ 27 ที่$/).waitFor();
   await form.getByRole("button", { name: "เพิ่ม เด็ก" }).click();
   if ((await form.getByRole("group", { name: "ผู้ใหญ่" }).locator("output").textContent()) !== "2") throw new Error("2 adults");
   if ((await form.getByRole("group", { name: "เด็ก" }).locator("output").textContent()) !== "1") throw new Error("1 child");

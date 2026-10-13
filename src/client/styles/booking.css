@@ -629,6 +629,40 @@ button.button--secondary {
   gap: 4px;
 }
 
+/* Tent spots left on the chosen dates (live). */
+.camping-form__left {
+  display: grid;
+  gap: 2px;
+  margin-top: -4px;
+  min-height: 1.5em;
+}
+
+.camping-form__left p {
+  margin: 0;
+}
+
+.camping-form__left-line {
+  font-weight: 700;
+}
+
+.camping-form__left-line.is-ok {
+  color: var(--color-success);
+}
+
+.camping-form__left-line.is-bad {
+  color: var(--color-error);
+}
+
+.camping-form__left-line.is-wait {
+  color: var(--color-muted);
+  font-weight: 400;
+}
+
+.camping-form__left-note {
+  color: var(--color-muted);
+  font-size: 0.875rem;
+}
+
 /* Phones: label left, stepper right, one row per count. */
 .camping-form__count {
   display: flex;
@@ -676,6 +710,16 @@ button.button--secondary {
 .camping-form__option small {
   color: var(--color-muted);
   font-size: 0.875rem;
+}
+
+.camping-form__option small.is-ok {
+  color: var(--color-success);
+  font-weight: 600;
+}
+
+.camping-form__option small.is-bad {
+  color: var(--color-error);
+  font-weight: 600;
 }
 
 .camping-form__option:has(input:checked) {

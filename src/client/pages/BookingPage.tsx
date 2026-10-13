@@ -112,6 +112,9 @@ export function BookingPage() {
     return result;
   }, [t]);
 
+  /** Camping form: spots left on its dates, without touching the search results above. */
+  const peek = useCallback((q: StayQuery) => fetchAvailability(q, t), [t]);
+
   // Deep link: run the search once, then pre-select the unit if it is free.
   const autoRan = useRef(false);
   useEffect(() => {
@@ -443,7 +446,7 @@ export function BookingPage() {
                   </p>
                   <p className="unit-card__meta">{fill(t.accommodation.childrenFree, { age: data.camping.childFreeUnderAge })}</p>
                   <CampingBooker camping={data.camping} initial={searched ?? query} initialTarp={campingTarp}
-                    onCheck={(q) => search(q, true)}
+                    onCheck={(q) => search(q, true)} onPeek={peek}
                     onBook={(q, tarp) => { setCampingTarp(tarp); choose({ kind: "CAMPING", tents: q.tents, tarp }, q); }} />
                 </>
               )}
