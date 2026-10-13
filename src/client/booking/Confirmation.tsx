@@ -71,7 +71,8 @@ export function Confirmation({
       </p>
       <SlipStatus booking={booking} />
       {booking.paymentInstructions ? (
-        <PaymentInstructions payment={booking.paymentInstructions} expiresAt={booking.expiresAt} bookingCode={booking.bookingCode} phone={phone}
+        <PaymentInstructions payment={booking.paymentInstructions} expiresAt={booking.expiresAt} bookingCode={booking.bookingCode}
+          laterSatang={booking.totalSatang - booking.paymentInstructions.amountDueSatang} phone={phone}
           slip={(channel) => (
             <SlipUpload bookingCode={booking.bookingCode} phone={phone} channel={channel}
               onDone={(r) => { paymentSubmittedEvent(r.booking); setBooking(r.booking); }} />

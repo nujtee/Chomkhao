@@ -176,7 +176,8 @@ function StayList({ title, empty, rows, only, onStay }: {
               <span>{r.customerName}</span>
               <span className="adm-muted">{r.itemName}{r.itemType === "OWN_TENT" ? ` × ${r.quantity}` : ""}{r.tarps > 0 ? ` + ${t.bk.tarp}` : ""} · {format(c.cal.guests, { adults: r.adults, children: r.children })}</span>
               <span className="adm-row adm-row--wrap"><BookingStatusBadge status={r.status} /> <PaymentBadge status={r.paymentStatus} /> {formatBaht(r.totalSatang, locale.code)}</span>
-              <StayButtons compact only={only} code={r.bookingCode} checkIn={r.checkIn} actions={r.stayActions} onDone={(_, message) => onStay(message)} />
+              <StayButtons compact only={only} code={r.bookingCode} checkIn={r.checkIn} actions={r.stayActions}
+                balanceSatang={r.status === "CONFIRMED" ? r.balanceSatang : 0} onDone={(_, message) => onStay(message)} />
             </li>
           ))}
         </ul>

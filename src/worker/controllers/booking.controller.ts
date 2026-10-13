@@ -1,6 +1,7 @@
 import type { BookingStatus, FoodSelection, PaymentStatus, PricingRuleInput, StaySelection } from "../../shared/booking-types.ts";
 import { BOOKING_CODE_PATTERN, IDEMPOTENCY_KEY_PATTERN } from "../../shared/booking-types.ts";
 import { MAX_PRICE_SATANG } from "../../shared/booking-rules.ts";
+import { BALANCE_METHODS, type BalanceMethod } from "../../shared/payment-types.ts";
 import { isIsoDate } from "../../shared/dates.ts";
 import { DEFAULT_LOCALE, parseLocale } from "../../shared/i18n/locales.ts";
 import { requestMeta, withAuth, withPermission, type ServicesFor } from "../http/auth-guard.ts";
@@ -222,6 +223,21 @@ export function bookingController(services: ServicesFor) {
       const checkIn = date(v, body.checkIn, "checkIn");
       v.assertValid();
       return jsonOk(await services(ctx).bookings.moveDates(auth, codeParam(ctx), checkIn, requestMeta(ctx)), { headers: NO_STORE });
+    }),
+
+    /** GET /api/admin/bookings/:code/balance — deposit plan: what is still due and where to pay it. */
+    balance: withPermission("bookings.edit", services, async (ctx, auth) =>
+      jsonOk(await services(ctx).bookings.balance(auth, codeParam(ctx), requestMeta(ctx)), { headers: NO_STORE })),
+
+    /** POST /api/admin/bookings/:code/balance { method, reference?, checkIn } — staff took the rest; usually checks in too. */
+    payBalance: withPermission("payments.verify", services, async (ctx, auth) => {
+      const body = await readJsonObject(ctx.request);
+      const v = new Validator(body).allowOnly(["method", "reference", "checkIn"]);
+      const method = v.oneOf("method", BALANCE_METHODS, { required: true }) as BalanceMethod;
+      const reference = v.string("reference", { max: 100 }) || null;
+      const checkIn = v.boolean("checkIn", false);
+      v.assertValid();
+      return jsonOk(await services(ctx).bookings.payBalance(auth, codeParam(ctx), { method, reference, checkIn }, requestMeta(ctx)), { headers: NO_STORE });
     }),
 
     cancel: withPermission("bookings.cancel", services, async (ctx, auth) => {

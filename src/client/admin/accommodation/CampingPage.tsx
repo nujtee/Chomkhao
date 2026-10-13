@@ -4,6 +4,8 @@ import { SATANG_PER_BAHT, parseBahtToSatang } from "../../../shared/booking-rule
 import { addDays, todayIn, DEFAULT_TIMEZONE } from "../../../shared/dates.ts";
 import { LOCALES, type LocaleCode } from "../../../shared/i18n/locales.ts";
 import { apiGet, apiRequest } from "../../api/client.ts";
+import type { PaymentMode } from "../../../shared/booking-rules.ts";
+import { PaymentModeField } from "./PaymentModeField.tsx";
 import { useAdmin } from "../AdminContext.tsx";
 import { Alert, Button, ConfirmDialog, detailMessage, errorMessage, Field, fieldErrors } from "../ui.tsx";
 
@@ -55,6 +57,7 @@ function SettingsForm({ settings, canEdit, onSaved, onError }: {
     tarpEnabled: settings.tarpEnabled,
     tarpPrice: String(settings.tarpPricePerNightSatang / SATANG_PER_BAHT),
     maxTarpsPerNight: String(settings.maxTarpsPerNight),
+    paymentMode: settings.paymentMode ?? ("FULL" as PaymentMode),
   });
   const [tr, setTr] = useState(() => Object.fromEntries(LOCALES.map((l) => [l.code, {
     name: settings.translations[l.code]?.name ?? "", description: settings.translations[l.code]?.description ?? "",
@@ -83,6 +86,8 @@ function SettingsForm({ settings, canEdit, onSaved, onError }: {
         tarpEnabled: f.tarpEnabled,
         tarpPricePerNightSatang: tarpPrice,
         maxTarpsPerNight: Number(f.maxTarpsPerNight || 0),
+        // Only when changed: it needs pricing.edit.
+        ...(f.paymentMode !== settings.paymentMode ? { paymentMode: f.paymentMode } : {}),
         translations,
       }));
     } catch (err) {
@@ -112,6 +117,7 @@ function SettingsForm({ settings, canEdit, onSaved, onError }: {
             onChange={(e) => setF({ ...f, childFreeUnderAge: e.target.value })} />
           <Field label={t.acc.maxGuestsPerTent} type="number" min={1} max={50} value={f.maxGuestsPerTent}
             onChange={(e) => setF({ ...f, maxGuestsPerTent: e.target.value })} />
+          <PaymentModeField id="camping-payment-mode" value={f.paymentMode} error={errors.paymentMode} onChange={(paymentMode) => setF({ ...f, paymentMode })} />
         </div>
         <fieldset className="adm-subform adm-tarp">
           <legend className="adm-h3">{t.acc.tarpTitle}</legend>

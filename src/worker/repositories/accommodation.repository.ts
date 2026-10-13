@@ -1,4 +1,5 @@
 import type { D1DatabaseLike, D1PreparedStatementLike } from "../env.ts";
+import { withFallback } from "./schema-fallback.ts";
 
 export interface UnitRow {
   id: string;
@@ -6,6 +7,8 @@ export interface UnitRow {
   unit_type: "HOUSE" | "VIP_TENT";
   slug: string;
   base_price_satang: number;
+  /** FULL | DEPOSIT_50 (migration 0025). */
+  payment_mode: "FULL" | "DEPOSIT_50";
   standard_guests: number;
   max_guests: number;
   max_adults: number | null;
@@ -49,37 +52,47 @@ export interface AmenityRow {
   names: string | null; // JSON {lang: name}
 }
 
-const UNIT_SELECT = `
-  SELECT u.id, u.unit_code, u.unit_type, u.slug, u.base_price_satang, u.standard_guests, u.max_guests,
+const unitSelect = (paymentMode: string) => `
+  SELECT u.id, u.unit_code, u.unit_type, u.slug, u.base_price_satang, ${paymentMode} AS payment_mode, u.standard_guests, u.max_guests,
          u.max_adults, u.status, u.sort_order, u.cover_asset_id,
          m.object_key AS cover_key, m.width AS cover_width, m.height AS cover_height,
          u.created_at, u.updated_at
     FROM accommodation_units u
     LEFT JOIN media_assets m ON m.id = u.cover_asset_id AND m.status = 'ACTIVE' AND m.bucket = 'PUBLIC'`;
+const UNIT_SELECT = unitSelect("u.payment_mode");
+/** Before migration 0025: every unit is paid in full. */
+const UNIT_SELECT_LEGACY = unitSelect("'FULL'");
 
 export class AccommodationRepository {
   constructor(private readonly db: D1DatabaseLike) {}
 
+  /** Runs a unit read with the current columns, or the pre-0025 ones while that migration is not applied yet. */
+  private units<T>(read: (select: string) => Promise<T>): Promise<T> {
+    return withFallback(() => read(UNIT_SELECT), () => read(UNIT_SELECT_LEGACY));
+  }
+
   async listUnits(filter: { type?: "HOUSE" | "VIP_TENT"; publicOnly?: boolean; includeDeleted?: boolean }): Promise<UnitRow[]> {
-    const { results } = await this.db
-      .prepare(
-        `${UNIT_SELECT}
-          WHERE (?1 IS NULL OR u.unit_type = ?1)
-            AND (?2 = 0 OR u.status = 'ACTIVE')
-            AND (?3 = 1 OR u.status <> 'DELETED')
-          ORDER BY u.unit_type, u.sort_order, u.unit_code`,
-      )
-      .bind(filter.type ?? null, filter.publicOnly ? 1 : 0, filter.includeDeleted ? 1 : 0)
-      .all<UnitRow>();
-    return results;
+    return this.units(async (select) => {
+      const { results } = await this.db
+        .prepare(
+          `${select}
+            WHERE (?1 IS NULL OR u.unit_type = ?1)
+              AND (?2 = 0 OR u.status = 'ACTIVE')
+              AND (?3 = 1 OR u.status <> 'DELETED')
+            ORDER BY u.unit_type, u.sort_order, u.unit_code`,
+        )
+        .bind(filter.type ?? null, filter.publicOnly ? 1 : 0, filter.includeDeleted ? 1 : 0)
+        .all<UnitRow>();
+      return results;
+    });
   }
 
   findUnit(id: string): Promise<UnitRow | null> {
-    return this.db.prepare(`${UNIT_SELECT} WHERE u.id = ?1`).bind(id).first<UnitRow>();
+    return this.units((select) => this.db.prepare(`${select} WHERE u.id = ?1`).bind(id).first<UnitRow>());
   }
 
   findActiveBySlug(slug: string): Promise<UnitRow | null> {
-    return this.db.prepare(`${UNIT_SELECT} WHERE u.slug = ?1 AND u.status = 'ACTIVE'`).bind(slug).first<UnitRow>();
+    return this.units((select) => this.db.prepare(`${select} WHERE u.slug = ?1 AND u.status = 'ACTIVE'`).bind(slug).first<UnitRow>());
   }
 
   async findByCodeOrSlug(code: string, slug: string): Promise<{ id: string; unit_code: string; slug: string }[]> {
@@ -146,31 +159,31 @@ export class AccommodationRepository {
   // ------------------------------------------------------------------ writes
 
   insertUnitStatement(u: {
-    id: string; unitCode: string; unitType: string; slug: string; basePriceSatang: number; standardGuests: number;
+    id: string; unitCode: string; unitType: string; slug: string; basePriceSatang: number; paymentMode: string; standardGuests: number;
     maxGuests: number; maxAdults: number | null; status: string; sortOrder: number; createdBy: string; now: string;
   }): D1PreparedStatementLike {
     return this.db
       .prepare(
         `INSERT INTO accommodation_units (id, unit_code, unit_type, slug, base_price_satang, standard_guests, max_guests,
-           max_adults, status, sort_order, created_by, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?12)`,
+           max_adults, status, sort_order, created_by, created_at, updated_at, payment_mode)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?12, ?13)`,
       )
       .bind(u.id, u.unitCode, u.unitType, u.slug, u.basePriceSatang, u.standardGuests, u.maxGuests, u.maxAdults,
-        u.status, u.sortOrder, u.createdBy, u.now);
+        u.status, u.sortOrder, u.createdBy, u.now, u.paymentMode);
   }
 
   updateUnitStatement(id: string, f: {
-    unitCode: string; slug: string; basePriceSatang: number; standardGuests: number; maxGuests: number;
+    unitCode: string; slug: string; basePriceSatang: number; paymentMode: string; standardGuests: number; maxGuests: number;
     maxAdults: number | null; status: string; sortOrder: number; now: string;
   }): D1PreparedStatementLike {
     return this.db
       .prepare(
         `UPDATE accommodation_units SET unit_code = ?2, slug = ?3, base_price_satang = ?4, standard_guests = ?5,
-                max_guests = ?6, max_adults = ?7, status = ?8, sort_order = ?9, updated_at = ?10,
+                max_guests = ?6, max_adults = ?7, status = ?8, sort_order = ?9, updated_at = ?10, payment_mode = ?11,
                 deleted_at = CASE WHEN ?8 = 'DELETED' THEN ?10 ELSE NULL END
           WHERE id = ?1`,
       )
-      .bind(id, f.unitCode, f.slug, f.basePriceSatang, f.standardGuests, f.maxGuests, f.maxAdults, f.status, f.sortOrder, f.now);
+      .bind(id, f.unitCode, f.slug, f.basePriceSatang, f.standardGuests, f.maxGuests, f.maxAdults, f.status, f.sortOrder, f.now, f.paymentMode);
   }
 
   upsertTranslationStatement(unitId: string, lang: string, t: {

@@ -1,5 +1,5 @@
 import type { ImageStatus, UnitStatus, UnitTranslationDto, UnitType } from "../../shared/accommodation-types.ts";
-import { MAX_PRICE_SATANG } from "../../shared/booking-rules.ts";
+import { MAX_PRICE_SATANG, PAYMENT_MODES, type PaymentMode } from "../../shared/booking-rules.ts";
 import { DEFAULT_LOCALE, LOCALE_CODES, parseLocale, type LocaleCode } from "../../shared/i18n/locales.ts";
 import { requestMeta, withAuth, withPermission, type ServicesFor } from "../http/auth-guard.ts";
 import { BadRequestError, HttpError, PayloadTooLargeError, ValidationError } from "../http/errors.ts";
@@ -138,12 +138,13 @@ export function accommodationController(services: ServicesFor) {
 
     create: withPermission("accommodation.edit", services, async (ctx, auth) => {
       const body = await readJsonObject(ctx.request);
-      const v = new Validator(body).allowOnly(["unitCode", "unitType", "slug", "basePriceSatang", "standardGuests", "maxGuests", "maxAdults", "status", "sortOrder"]);
+      const v = new Validator(body).allowOnly(["unitCode", "unitType", "slug", "basePriceSatang", "paymentMode", "standardGuests", "maxGuests", "maxAdults", "status", "sortOrder"]);
       const input = {
         unitCode: v.string("unitCode", { required: true, pattern: UNIT_CODE }),
         unitType: v.oneOf("unitType", UNIT_TYPES, { required: true })!,
         slug: v.string("slug", { required: true, pattern: SLUG }),
         basePriceSatang: int(v, body, "basePriceSatang", 0, MAX_PRICE_SATANG, true)!,
+        paymentMode: (v.oneOf("paymentMode", PAYMENT_MODES) ?? "FULL") as PaymentMode,
         standardGuests: int(v, body, "standardGuests", 1, 50, true)!,
         maxGuests: int(v, body, "maxGuests", 1, 50, true)!,
         maxAdults: nullableInt(v, body, "maxAdults", 1, 50) ?? null,
@@ -157,11 +158,12 @@ export function accommodationController(services: ServicesFor) {
 
     update: withPermission("accommodation.edit", services, async (ctx, auth) => {
       const body = await readJsonObject(ctx.request);
-      const v = new Validator(body).allowOnly(["unitCode", "slug", "basePriceSatang", "standardGuests", "maxGuests", "maxAdults", "status", "sortOrder"]);
+      const v = new Validator(body).allowOnly(["unitCode", "slug", "basePriceSatang", "paymentMode", "standardGuests", "maxGuests", "maxAdults", "status", "sortOrder"]);
       const patch = {
         unitCode: v.has("unitCode") ? v.string("unitCode", { required: true, pattern: UNIT_CODE }) : undefined,
         slug: v.has("slug") ? v.string("slug", { required: true, pattern: SLUG }) : undefined,
         basePriceSatang: int(v, body, "basePriceSatang", 0, MAX_PRICE_SATANG, false),
+        paymentMode: v.oneOf("paymentMode", PAYMENT_MODES) as PaymentMode | undefined,
         standardGuests: int(v, body, "standardGuests", 1, 50, false),
         maxGuests: int(v, body, "maxGuests", 1, 50, false),
         maxAdults: nullableInt(v, body, "maxAdults", 1, 50),
@@ -278,7 +280,7 @@ export function accommodationController(services: ServicesFor) {
       const body = await readJsonObject(ctx.request);
       const v = new Validator(body).allowOnly([
         "isEnabled", "maxTentsPerNight", "pricePerAdultNightSatang", "childFreeUnderAge", "maxGuestsPerTent", "coverAssetId", "translations",
-        "tarpEnabled", "tarpPricePerNightSatang", "maxTarpsPerNight",
+        "tarpEnabled", "tarpPricePerNightSatang", "maxTarpsPerNight", "paymentMode",
       ]);
       const input = {
         isEnabled: v.boolean("isEnabled", false),
@@ -291,6 +293,8 @@ export function accommodationController(services: ServicesFor) {
         tarpEnabled: body.tarpEnabled === undefined ? undefined : v.boolean("tarpEnabled", false),
         tarpPricePerNightSatang: int(v, body, "tarpPricePerNightSatang", 0, MAX_PRICE_SATANG, false),
         maxTarpsPerNight: int(v, body, "maxTarpsPerNight", 0, 1000, false),
+        // Deposit plan; left out = unchanged.
+        paymentMode: v.oneOf("paymentMode", PAYMENT_MODES) as PaymentMode | undefined,
       };
       v.assertValid();
       const t = body.translations === undefined ? undefined : translations(body.translations, (tv) => {

@@ -10,6 +10,9 @@ import type {
 } from "../../shared/booking-types.ts";
 import { BOOKING_CODE_PATTERN, maskPhone, normalizePhone, type BookingMoveOptionsDto, type MoveDayState } from "../../shared/booking-types.ts";
 import type { BookingSettingsDto, StayAction } from "../../shared/dashboard-types.ts";
+import type { BalanceDueDto, BalanceMethod } from "../../shared/payment-types.ts";
+import { balanceDue } from "../../shared/booking-rules.ts";
+import { dueOnline, paidOf } from "./booking-money.ts";
 import { addDays, diffDays, stayNights, todayIn } from "../../shared/dates.ts";
 import { BookingMoveRepository, KITCHEN_STARTED } from "../repositories/booking-move.repository.ts";
 import { moveDayState, type MoveInputs } from "./booking-move.ts";
@@ -170,6 +173,7 @@ export class BookingService {
         accommodationSubtotal: q.accommodationSubtotalSatang,
         foodSubtotal: q.foodSubtotalSatang,
         total: q.totalSatang,
+        deposit: q.depositSatang,
         currency: q.currency,
         expiresAt: iso(addMs(now, p.settings.hold_minutes * 60_000)),
         idempotencyKey: input.idempotencyKey,
@@ -384,6 +388,8 @@ export class BookingService {
         customerName: r.customer_name,
         customerPhone: r.customer_phone,
         totalSatang: r.total_satang,
+        depositSatang: r.deposit_satang,
+        balanceSatang: balanceDue(r.total_satang, r.paid_satang),
         expiresAt: r.expires_at,
         createdAt: r.created_at,
         stayActions: stayActions(r.booking_status, r.check_in, r.check_out, today),
@@ -444,12 +450,85 @@ export class BookingService {
     if (gate === null) throw new ConflictError(`Booking must be ${step.from} for this action`, "BOOKING_STATUS_INVALID");
     if (gate === "NOT_YET") throw new ConflictError("The stay has not started yet", "STAY_NOT_STARTED");
     if (gate === "ENDED") throw new ConflictError("The stay has already ended", "STAY_ENDED");
+    // Deposit plan: the rest is taken at reception first (POST …/balance with checkIn), never skipped.
+    if (action === "check-in" && row.deposit_satang !== null && balanceDue(row.total_satang, paidOf(await this.payments.payments(row.id))) > 0) {
+      throw new ConflictError("Take the rest of the payment before check-in", "BALANCE_DUE");
+    }
     const now = iso(this.clock());
-    const results = await this.db.batch([
-      this.repo.transitionStatement(row.id, step.from, step.to, now),
-      this.log.auditStatement(actor.userId, step.audit, "bookings", row.id, { status: step.from }, { status: step.to }, meta),
-    ]);
+    let results;
+    try {
+      results = await this.db.batch([
+        this.repo.transitionStatement(row.id, step.from, step.to, now),
+        this.log.auditStatement(actor.userId, step.audit, "bookings", row.id, { status: step.from }, { status: step.to }, meta),
+      ]);
+    } catch (error) {
+      if (/BALANCE_DUE/.test(String(error))) throw new ConflictError("Take the rest of the payment before check-in", "BALANCE_DUE");
+      throw error;
+    }
     if (!(results[0]?.results.length)) throw new ConflictError("The booking changed meanwhile, please reload", "BOOKING_STATUS_INVALID");
+    return this.toAdmin((await this.repo.findByCode(row.booking_code))!);
+  }
+
+  // ================================================================ admin: the rest of a deposit, at reception
+
+  /** What a deposit booking still owes, and the account / PromptPay QR to show the guest. */
+  async balance(actor: AuthContext, code: string, meta: RequestMeta): Promise<BalanceDueDto> {
+    await this.authz.requirePermission(actor, "bookings.edit", meta);
+    const row = await this.expireIfDue(await this.findOr404(code));
+    const [payments, primary, snapshot] = await Promise.all([this.payments.payments(row.id), this.payments.primaryAccount(), this.payments.snapshot(row.id)]);
+    const paidSatang = paidOf(payments);
+    const balanceSatang = balanceDue(row.total_satang, paidSatang);
+    // Money taken today goes to today's primary account; the one copied at booking time if there is none.
+    const account = primary ? {
+      bankName: primary.bank_name, accountName: primary.account_name, accountNumber: primary.account_number,
+      promptpayNumber: primary.promptpay_number, qrUrl: publicMediaUrl(primary.qr_key, this.mediaBaseUrl),
+    } : snapshot ? {
+      bankName: snapshot.bank_name_snapshot, accountName: snapshot.account_name_snapshot, accountNumber: snapshot.account_number_snapshot,
+      promptpayNumber: snapshot.promptpay_number_snapshot, qrUrl: publicMediaUrl(snapshot.payment_qr_snapshot, this.mediaBaseUrl),
+    } : null;
+    return {
+      bookingCode: row.booking_code, totalSatang: row.total_satang, paidSatang, balanceSatang, account,
+      promptpayPayload: account?.promptpayNumber && balanceSatang > 0 ? promptpayPayload(account.promptpayNumber, balanceSatang) : null,
+    };
+  }
+
+  /**
+   * Staff took the rest at reception (cash, or a PromptPay / bank transfer they saw arrive) — and, usually, check the
+   * guest in. One batch: the payment is inserted only if the booking still owes exactly that amount, and the
+   * database refuses the check-in of a deposit booking that is not fully paid (trigger, migration 0025).
+   */
+  async payBalance(
+    actor: AuthContext,
+    code: string,
+    input: { method: BalanceMethod; reference: string | null; checkIn: boolean },
+    meta: RequestMeta,
+  ): Promise<AdminBookingDto> {
+    await this.authz.requirePermission(actor, "payments.verify", meta);
+    if (input.checkIn) await this.authz.requirePermission(actor, "bookings.edit", meta);
+    const row = await this.expireIfDue(await this.findOr404(code));
+    if (row.booking_status !== "CONFIRMED") throw new ConflictError("Only a confirmed booking can be paid at reception", "BOOKING_STATUS_INVALID");
+    const paidBefore = paidOf(await this.payments.payments(row.id));
+    const amount = balanceDue(row.total_satang, paidBefore);
+    if (amount === 0) throw new ConflictError("Nothing is due on this booking", "NOTHING_DUE");
+    if (input.checkIn) {
+      const gate = stayActions(row.booking_status, row.check_in, row.check_out, todayIn(await this.quotes.timezone(), this.clock())).checkIn;
+      if (gate === "NOT_YET") throw new ConflictError("The stay has not started yet", "STAY_NOT_STARTED");
+      if (gate === "ENDED") throw new ConflictError("The stay has already ended", "STAY_ENDED");
+    }
+    const now = iso(this.clock());
+    const paymentId = newId();
+    const results = await this.db.batch([
+      this.payments.insertBalancePaymentStatement({ id: paymentId, bookingId: row.id, amount, method: input.method, reference: input.reference, by: actor.userId, now }),
+      // Sees the payment above (same transaction); does nothing if the booking moved on meanwhile.
+      ...(input.checkIn ? [this.repo.transitionStatement(row.id, "CONFIRMED", "CHECKED_IN", now)] : []),
+    ]);
+    if (!results[0]?.results.length) throw new ConflictError("The booking changed meanwhile, please reload", "BOOKING_CHANGED");
+    await this.db.batch([
+      this.log.auditStatement(actor.userId, "RECORD_BALANCE_PAYMENT", "payments", paymentId, { paidSatang: paidBefore },
+        { bookingCode: row.booking_code, amountSatang: amount, method: input.method, reference: input.reference }, meta),
+      ...(input.checkIn && results[1]?.results.length
+        ? [this.log.auditStatement(actor.userId, "CHECK_IN", "bookings", row.id, { status: "CONFIRMED" }, { status: "CHECKED_IN" }, meta)] : []),
+    ]);
     return this.toAdmin((await this.repo.findByCode(row.booking_code))!);
   }
 
@@ -629,9 +708,12 @@ export class BookingService {
       this.lineStatus ? this.lineStatus(row) : Promise.resolve({ available: false, linked: false }),
       this.repo.tarp(row.id),
       awaitingPayment ? this.payments.settings() : Promise.resolve(null),
-      awaitingPayment && row.payment_status === "REJECTED" ? this.payments.payments(row.id) : Promise.resolve([]),
+      this.payments.payments(row.id),
     ]);
     const rejected = payments.filter((p) => p.status === "REJECTED").at(-1);
+    const paidSatang = paidOf(payments);
+    // Asked online: the deposit on a deposit plan, else the whole total.
+    const dueNow = dueOnline(row);
     const item = items[0]!;
     return {
       bookingCode: row.booking_code,
@@ -648,11 +730,11 @@ export class BookingService {
         accountNumber: snapshot.account_number_snapshot,
         promptpayNumber: snapshot.promptpay_number_snapshot,
         qrUrl: publicMediaUrl(snapshot.payment_qr_snapshot, this.mediaBaseUrl),
-        amountDueSatang: row.total_satang,
+        amountDueSatang: dueNow,
         channels: availableChannels(paySettings, {
           promptpay: snapshot.promptpay_number_snapshot, accountNumber: snapshot.account_number_snapshot, qr: snapshot.payment_qr_snapshot,
         }, this.paypalReady),
-        promptpayPayload: snapshot.promptpay_number_snapshot && row.total_satang > 0 ? promptpayPayload(snapshot.promptpay_number_snapshot, row.total_satang) : null,
+        promptpayPayload: snapshot.promptpay_number_snapshot && dueNow > 0 ? promptpayPayload(snapshot.promptpay_number_snapshot, dueNow) : null,
       } : null,
       paymentRejectedReason: rejected?.rejected_reason ?? null,
       cancelReason: row.booking_status === "CANCELLED" ? row.cancel_reason : null,
@@ -695,6 +777,9 @@ export class BookingService {
       discountSatang: row.discount_satang,
       totalSatang: row.total_satang,
       currency: row.currency,
+      depositSatang: row.deposit_satang,
+      paidSatang,
+      balanceSatang: balanceDue(row.total_satang, paidSatang),
     };
   }
 

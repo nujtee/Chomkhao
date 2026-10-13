@@ -224,6 +224,23 @@ button.button--secondary {
   border-top-width: 2px;
 }
 
+/* Deposit plan: what is paid now and at check-in, under the total. */
+.summary__line--deposit {
+  font-size: 0.9375rem;
+}
+
+.summary__line--due {
+  font-weight: 700;
+  color: var(--color-primary);
+}
+
+.summary__note,
+.pay__later {
+  margin: 8px 0 0;
+  color: var(--color-muted);
+  font-size: 0.875rem;
+}
+
 /* ---------- Food ---------- */
 .food-step__intro {
   color: var(--color-muted);

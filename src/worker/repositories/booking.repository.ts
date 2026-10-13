@@ -1,4 +1,5 @@
 import type { D1DatabaseLike, D1PreparedStatementLike } from "../env.ts";
+import { withFallback } from "./schema-fallback.ts";
 import { containsPattern } from "./sql-like.ts";
 
 export interface BookingRow {
@@ -24,6 +25,8 @@ export interface BookingRow {
   subtotal_satang: number;
   discount_satang: number;
   total_satang: number;
+  /** Deposit plan: amount asked online; null = full payment (migration 0025). */
+  deposit_satang: number | null;
   currency: string;
   expires_at: string | null;
   cancelled_at: string | null;
@@ -82,6 +85,9 @@ export interface AdminBookingListRow {
   customer_name: string;
   customer_phone: string;
   total_satang: number;
+  deposit_satang: number | null;
+  /** Money received: verified / paid payments. */
+  paid_satang: number;
   expires_at: string | null;
   created_at: string;
   item_type: "HOUSE" | "VIP_TENT" | "OWN_TENT";
@@ -98,25 +104,40 @@ export interface BookingTarpRow {
   status: string;
 }
 
-const BOOKING_COLUMNS = `id, booking_code, language_code, source, check_in, check_out, nights, adults, children, customer_name,
+const bookingColumns = (deposit: string) => `id, booking_code, language_code, source, check_in, check_out, nights, adults, children, customer_name,
   customer_phone, customer_phone_normalized, customer_email, customer_line_id, customer_note, booking_status, payment_status,
-  accommodation_subtotal_satang, food_subtotal_satang, subtotal_satang, discount_satang, total_satang, currency, expires_at,
+  accommodation_subtotal_satang, food_subtotal_satang, subtotal_satang, discount_satang, total_satang, ${deposit} AS deposit_satang, currency, expires_at,
   cancelled_at, cancel_reason, idempotency_key, privacy_accepted_at, created_at, updated_at`;
+const BOOKING_COLUMNS = bookingColumns("deposit_satang");
+/** Before migration 0025: no booking has a deposit. */
+const BOOKING_COLUMNS_LEGACY = bookingColumns("NULL");
+
+/** Money received for booking `b` (verified / paid payments). What is still due = total_satang − this. */
+export const PAID_SQL = `(SELECT COALESCE(SUM(p.amount_satang), 0) FROM payments p WHERE p.booking_id = b.id AND p.status IN ('VERIFIED', 'PAID'))`;
 
 /** SQL for bookings. The service composes these statements into one atomic batch. */
 export class BookingRepository {
   constructor(private readonly db: D1DatabaseLike) {}
 
   findByCode(code: string): Promise<BookingRow | null> {
-    return this.db.prepare(`SELECT ${BOOKING_COLUMNS} FROM bookings WHERE booking_code = ?1`).bind(code).first<BookingRow>();
+    return withFallback(
+      () => this.db.prepare(`SELECT ${BOOKING_COLUMNS} FROM bookings WHERE booking_code = ?1`).bind(code).first<BookingRow>(),
+      () => this.db.prepare(`SELECT ${BOOKING_COLUMNS_LEGACY} FROM bookings WHERE booking_code = ?1`).bind(code).first<BookingRow>(),
+    );
   }
 
   findById(id: string): Promise<BookingRow | null> {
-    return this.db.prepare(`SELECT ${BOOKING_COLUMNS} FROM bookings WHERE id = ?1`).bind(id).first<BookingRow>();
+    return withFallback(
+      () => this.db.prepare(`SELECT ${BOOKING_COLUMNS} FROM bookings WHERE id = ?1`).bind(id).first<BookingRow>(),
+      () => this.db.prepare(`SELECT ${BOOKING_COLUMNS_LEGACY} FROM bookings WHERE id = ?1`).bind(id).first<BookingRow>(),
+    );
   }
 
   findByIdempotencyKey(key: string): Promise<BookingRow | null> {
-    return this.db.prepare(`SELECT ${BOOKING_COLUMNS} FROM bookings WHERE idempotency_key = ?1`).bind(key).first<BookingRow>();
+    return withFallback(
+      () => this.db.prepare(`SELECT ${BOOKING_COLUMNS} FROM bookings WHERE idempotency_key = ?1`).bind(key).first<BookingRow>(),
+      () => this.db.prepare(`SELECT ${BOOKING_COLUMNS_LEGACY} FROM bookings WHERE idempotency_key = ?1`).bind(key).first<BookingRow>(),
+    );
   }
 
   async items(bookingId: string): Promise<BookingItemRow[]> {
@@ -175,10 +196,16 @@ export class BookingRepository {
   async list(filter: {
     status?: string; payment?: string; from?: string; to?: string; q?: string; qPhone?: string | null; before?: string; limit: number;
   }): Promise<AdminBookingListRow[]> {
+    return withFallback(() => this.listWith(filter, "b.deposit_satang"), () => this.listWith(filter, "NULL"));
+  }
+
+  private async listWith(filter: {
+    status?: string; payment?: string; from?: string; to?: string; q?: string; qPhone?: string | null; before?: string; limit: number;
+  }, deposit: string): Promise<AdminBookingListRow[]> {
     const { results } = await this.db
       .prepare(
         `SELECT b.id, b.booking_code, b.booking_status, b.payment_status, b.check_in, b.check_out, b.nights, b.adults, b.children,
-                b.customer_name, b.customer_phone, b.total_satang, b.expires_at, b.created_at,
+                b.customer_name, b.customer_phone, b.total_satang, ${deposit} AS deposit_satang, ${PAID_SQL} AS paid_satang, b.expires_at, b.created_at,
                 i.item_type, s.unit_name_snapshot AS item_name, i.quantity,
                 (SELECT COALESCE(SUM(t.quantity), 0) FROM booking_tarps t WHERE t.booking_id = b.id) AS tarps
            FROM bookings b
@@ -224,7 +251,7 @@ export class BookingRepository {
   insertBookingStatement(b: {
     id: string; code: string; lang: string; checkIn: string; checkOut: string; nights: number; adults: number; children: number;
     name: string; phone: string; phoneNormalized: string; email: string | null; lineId: string | null; note: string | null;
-    accommodationSubtotal: number; foodSubtotal: number; total: number; currency: string; expiresAt: string;
+    accommodationSubtotal: number; foodSubtotal: number; total: number; deposit: number | null; currency: string; expiresAt: string;
     idempotencyKey: string; privacyAcceptedAt: string; now: string;
   }): D1PreparedStatementLike {
     return this.db
@@ -232,13 +259,14 @@ export class BookingRepository {
         `INSERT INTO bookings (id, booking_code, language_code, source, check_in, check_out, nights, adults, children,
            customer_name, customer_phone, customer_phone_normalized, customer_email, customer_line_id, customer_note,
            booking_status, payment_status, accommodation_subtotal_satang, food_subtotal_satang, subtotal_satang,
-           discount_satang, total_satang, currency, expires_at, idempotency_key, privacy_accepted_at, created_at, updated_at)
+           discount_satang, total_satang, currency, expires_at, idempotency_key, privacy_accepted_at, created_at, updated_at,
+           deposit_satang)
          VALUES (?1, ?2, ?3, 'WEB', ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, 'PENDING', 'UNPAID', ?15, ?16, ?17, 0, ?17,
-           ?18, ?19, ?20, ?21, ?22, ?22)`,
+           ?18, ?19, ?20, ?21, ?22, ?22, ?23)`,
       )
       .bind(b.id, b.code, b.lang, b.checkIn, b.checkOut, b.nights, b.adults, b.children, b.name, b.phone, b.phoneNormalized,
         b.email, b.lineId, b.note, b.accommodationSubtotal, b.foodSubtotal, b.accommodationSubtotal + b.foodSubtotal,
-        b.currency, b.expiresAt, b.idempotencyKey, b.privacyAcceptedAt, b.now);
+        b.currency, b.expiresAt, b.idempotencyKey, b.privacyAcceptedAt, b.now, b.deposit);
   }
 
   insertItemStatement(i: {

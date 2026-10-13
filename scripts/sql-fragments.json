@@ -16,13 +16,21 @@
     "table",
     "vals.length"
   ],
+  "src/worker/repositories/accommodation.repository.ts": [
+    "select"
+  ],
   "src/worker/repositories/booking-move.repository.ts": [
     "holdsCapacity",
     "moved",
     "ownOrder"
   ],
   "src/worker/repositories/booking.repository.ts": [
+    "deposit",
     "ended"
+  ],
+  "src/worker/repositories/dashboard.repository.ts": [
+    "select",
+    "tail"
   ],
   "src/worker/repositories/email.repository.ts": [
     "flag",
@@ -32,6 +40,7 @@
     "chunk.map((_, j) => `?${j + 1}`).join(\", \")"
   ],
   "src/worker/repositories/line.repository.ts": [
+    "deposit",
     "flag",
     "guard",
     "redeemedHere"

@@ -11,6 +11,7 @@ import type {
   StaySelection,
   TarpLineDto,
 } from "../../shared/booking-types.ts";
+import { depositDue } from "../../shared/booking-rules.ts";
 import { DEFAULT_TIMEZONE, addDays, dayOfWeek, localDateTimeIn, todayIn } from "../../shared/dates.ts";
 import { ConflictError, NotFoundError, ValidationError } from "../http/errors.ts";
 import type { AccommodationRepository, UnitRow } from "../repositories/accommodation.repository.ts";
@@ -226,6 +227,9 @@ export class QuoteService {
     const foodLines = [...included.lines, ...extra];
     const accommodationSubtotalSatang = item.subtotalSatang + (tarp?.subtotalSatang ?? 0);
     const foodSubtotalSatang = foodLines.reduce((acc, l) => acc + l.dto.subtotalSatang, 0);
+    const totalSatang = accommodationSubtotalSatang + foodSubtotalSatang;
+    // Deposit plan of this house / tent / camping (migration 0025): half of the stay now, the rest before check-in.
+    const mode = (unit ? unit.payment_mode : camping?.payment_mode) ?? "FULL";
     return {
       quote: {
         checkIn: input.checkIn,
@@ -240,8 +244,9 @@ export class QuoteService {
         accommodationSubtotalSatang,
         foodSubtotalSatang,
         discountSatang: 0,
-        totalSatang: accommodationSubtotalSatang + foodSubtotalSatang,
+        totalSatang,
         currency: "THB",
+        depositSatang: depositDue(mode, accommodationSubtotalSatang, totalSatang),
       },
       nights,
       unit,

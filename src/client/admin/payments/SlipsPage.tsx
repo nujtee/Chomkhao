@@ -150,7 +150,9 @@ function SlipCard({ item, approvalMode, onChanged }: { item: SlipQueueItemDto; a
         <h2 className="adm-h2"><Link to={href("bookings", item.bookingCode)} className="adm-mono">{item.bookingCode}</Link></h2>
         <p className="adm-small">{item.customerName} · {stayDate(item.checkIn)} → {stayDate(item.checkOut)}</p>
         <p>
-          {t.slip.total}: <strong>{formatBaht(item.totalSatang, locale.code)}</strong>
+          {/* What this slip must show: the deposit on a deposit plan (the rest is taken at check-in), else the total. */}
+          {t.slip.total}: <strong>{formatBaht(item.amountSatang, locale.code)}</strong>
+          {item.amountSatang < item.totalSatang && <span className="adm-muted adm-small"> ({t.pay.kindDeposit} · {t.bk.total} {formatBaht(item.totalSatang, locale.code)})</span>}
           {item.channel && <> · <span className="adm-badge adm-badge--muted">{t.pay[`c${item.channel}`]}</span></>}
           {" · "}<span className="adm-muted adm-small">{t.slip.submitted} {dateTime(item.submittedAt)}</span>
         </p>

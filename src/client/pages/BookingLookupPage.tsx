@@ -128,7 +128,8 @@ export function BookingLookupPage() {
           <p className="summary__meta">{booking.customerName} · {booking.customerPhoneMasked}</p>
           <SlipStatus booking={booking} />
           {booking.paymentInstructions ? (
-            <PaymentInstructions payment={booking.paymentInstructions} expiresAt={booking.expiresAt} bookingCode={booking.bookingCode} phone={phone.trim()}
+            <PaymentInstructions payment={booking.paymentInstructions} expiresAt={booking.expiresAt} bookingCode={booking.bookingCode}
+          laterSatang={booking.totalSatang - booking.paymentInstructions.amountDueSatang} phone={phone.trim()}
               slip={(channel) => (
                 <SlipUpload bookingCode={booking.bookingCode} phone={phone.trim()} channel={channel}
                   onDone={(r) => { paymentSubmittedEvent(r.booking); setBooking(r.booking); }} />

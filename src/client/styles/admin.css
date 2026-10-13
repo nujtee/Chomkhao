@@ -2136,6 +2136,114 @@
   align-items: center;
 }
 
+/* Deposit plan: what is still due (lists, payment panel, check-in). */
+.adm-due {
+  color: var(--color-warning);
+  font-weight: 600;
+}
+
+.adm-stay__due {
+  color: var(--color-warning);
+}
+
+.adm-deposit {
+  margin: 0 0 12px;
+}
+
+.adm-deposit__kind {
+  margin-right: 6px;
+}
+
+/* Check in with money due: the amount, a choice of PromptPay QR / bank account / cash, then confirm. */
+.adm-balance {
+  width: min(460px, calc(100vw - 32px));
+}
+
+.adm-balance__due {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 12px 0;
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--color-warning) 9%, var(--color-surface));
+}
+
+.adm-balance__due strong {
+  font-size: 1.5rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-heading);
+}
+
+.adm-balance__ways {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.adm-balance__tabs {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.adm-balance__tab {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 6px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  text-align: center;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.adm-balance__tab input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.adm-balance__tab:has(input:checked) {
+  border-color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 10%, var(--color-surface));
+  color: var(--color-primary);
+}
+
+.adm-balance__tab:has(input:focus-visible) {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.adm-balance__panel {
+  margin: 14px 0 6px;
+  min-height: 80px;
+}
+
+.adm-balance__qr {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  text-align: center;
+}
+
+.adm-balance__qr .qr,
+.adm-balance__qr img {
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+}
+
+.adm-balance__number {
+  font-size: 1.25rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
 /* Gallery: a category still in draft hides its images from the public page. */
 .adm-gallery-draft {
   display: flex;

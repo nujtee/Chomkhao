@@ -1,11 +1,13 @@
 import { useState } from "react";
 import type { AdminBookingDto } from "../../../shared/booking-types.ts";
 import type { StayAction } from "../../../shared/dashboard-types.ts";
+import { formatBaht } from "../../../shared/booking-rules.ts";
 import { format } from "../../../shared/i18n/admin-messages.ts";
 import type { StayActionsDto, StayGate } from "../../../shared/stay.ts";
-import { apiRequest } from "../../api/client.ts";
+import { ApiError, apiRequest } from "../../api/client.ts";
 import { useAdmin } from "../AdminContext.tsx";
 import { Button, ConfirmDialog, detailMessage } from "../ui.tsx";
+import { BalanceDialog } from "./BalanceDialog.tsx";
 import { useStayDate } from "./shared.tsx";
 
 /**
@@ -13,18 +15,22 @@ import { useStayDate } from "./shared.tsx";
  * dashboard arrivals / departures). `compact` (lists) shows only what can be done today; the booking page
  * also shows what opens later, disabled, with the day it opens. The Worker checks the same rules (shared/stay.ts).
  */
-export function StayButtons({ code, checkIn, actions, compact = false, only, onDone }: {
+export function StayButtons({ code, checkIn, actions, compact = false, only, balanceSatang = 0, onDone }: {
   code: string;
   checkIn: string;
   actions: StayActionsDto;
   compact?: boolean;
+  /** Deposit plan: still due — check-in then opens the "take the balance" dialog first. */
+  balanceSatang?: number;
   /** Limit to these actions (dashboard: arrivals check in / no-show, departures check out). */
   only?: StayAction[];
   onDone: (booking: AdminBookingDto, message: string) => void;
 }) {
-  const { c, t, can } = useAdmin();
+  const { c, t, can, locale } = useAdmin();
   const stayDate = useStayDate();
   const [confirm, setConfirm] = useState<StayAction | null>(null);
+  /** The balance dialog (deposit plan) — opened by check-in while money is due. */
+  const [paying, setPaying] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -45,7 +51,9 @@ export function StayButtons({ code, checkIn, actions, compact = false, only, onD
       const booking = await apiRequest<AdminBookingDto>("POST", `/api/admin/bookings/${encodeURIComponent(code)}/stay/${action}`);
       onDone(booking, format(c.stay.doneFor, { code, action: label }));
     } catch (err) {
-      setError(detailMessage(t, err));
+      // Money still due (deposit plan, not known here): take it first.
+      if (action === "check-in" && err instanceof ApiError && err.code === "BALANCE_DUE") setPaying(true);
+      else setError(detailMessage(t, err));
     } finally {
       setBusy(false);
     }
@@ -55,14 +63,20 @@ export function StayButtons({ code, checkIn, actions, compact = false, only, onD
     <div className={`adm-stay${compact ? " adm-stay--compact" : ""}`}>
       <div className="adm-row adm-row--wrap">
         {shown.map((b) => (
-          <Button key={b.action} variant={b.variant} busy={busy} disabled={b.gate !== "OK"} onClick={() => setConfirm(b.action)}
+          <Button key={b.action} variant={b.variant} busy={busy} disabled={b.gate !== "OK"}
+            onClick={() => (b.action === "check-in" && balanceSatang > 0 ? setPaying(true) : setConfirm(b.action))}
             aria-label={compact ? `${b.label} ${code}` : undefined}>
             {b.label}
           </Button>
         ))}
       </div>
       {shown.some((b) => b.gate === "NOT_YET") && <p className="adm-field__hint">{format(c.stay.opensOn, { date: stayDate(checkIn) })}</p>}
+      {balanceSatang > 0 && shown.some((b) => b.action === "check-in") && (
+        <p className="adm-field__hint adm-stay__due">{format(t.pay.balanceBadge, { amount: formatBaht(balanceSatang, locale.code) })}</p>
+      )}
       {error && <p className="adm-field__error" role="alert">{error}</p>}
+      <BalanceDialog code={code} open={paying} onClose={() => setPaying(false)}
+        onDone={(booking, message) => { setPaying(false); onDone(booking, message); }} />
       <ConfirmDialog open={pending !== null} danger={pending?.action === "no-show"}
         message={pending ? `${code} — ${pending.confirm}` : ""} confirmLabel={pending?.label ?? ""}
         onConfirm={() => pending && void run(pending.action, pending.label)} onCancel={() => setConfirm(null)} />

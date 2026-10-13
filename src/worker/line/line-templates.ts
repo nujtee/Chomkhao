@@ -33,6 +33,8 @@ export interface MsgBooking {
   bookingStatus: string;
   paymentStatus: string;
   totalSatang: number;
+  /** Deposit plan: the amount paid online; the rest is paid at check-in (migration 0025). */
+  depositSatang?: number | null;
   food: MsgFood[];
   /** Why staff cancelled (guest messages). */
   cancelReason?: string | null;
@@ -74,6 +76,9 @@ const th = {
   payment: "การชำระเงิน",
   total: "ยอดรวม",
   amount: "ยอดโอน",
+  depositOnline: "มัดจำ (ชำระออนไลน์)",
+  depositPaid: "มัดจำที่ชำระแล้ว",
+  balanceAtCheckIn: "คงเหลือ ชำระวันเช็กอิน",
   open: "เปิดดู",
   kitchenTitle: "🍽️ อาหารที่ต้องเตรียม{when}: {date}",
   noFood: "ไม่มีรายการอาหาร",
@@ -155,6 +160,9 @@ const en: Texts = {
   payment: "Payment",
   total: "Total",
   amount: "Amount",
+  depositOnline: "Deposit (paid online)",
+  depositPaid: "Deposit paid",
+  balanceAtCheckIn: "Balance, paid at check-in",
   open: "Open",
   kitchenTitle: "🍽️ Food to prepare {when}: {date}",
   noFood: "No food orders.",
@@ -234,6 +242,9 @@ const zh: Texts = {
   payment: "付款",
   total: "合计",
   amount: "金额",
+  depositOnline: "定金（在线支付）",
+  depositPaid: "已付定金",
+  balanceAtCheckIn: "余款（入住时支付）",
   open: "查看",
   kitchenTitle: "🍽️ {when}需准备的餐饮：{date}",
   noFood: "没有餐饮订单。",
@@ -434,6 +445,15 @@ export function paymentReviewText(
   ].join("\n");
 }
 
+/** Deposit plan: "deposit … · balance at check-in …" lines (nothing for a booking paid in full). */
+function depositLines(f: LineFormatter, b: MsgBooking, paid: boolean): string[] {
+  if (!b.depositSatang) return [];
+  return [
+    `${paid ? f.t.depositPaid : f.t.depositOnline}: ${f.money(b.depositSatang)}`,
+    `${f.t.balanceAtCheckIn}: ${f.money(Math.max(0, b.totalSatang - b.depositSatang))}`,
+  ];
+}
+
 export function paymentConfirmedText(f: LineFormatter, b: MsgBooking, method: string | null, channel: string | null = null): string {
   const t = f.t;
   const by = f.paidBy(method, channel);
@@ -441,6 +461,7 @@ export function paymentConfirmedText(f: LineFormatter, b: MsgBooking, method: st
     t.confirmedTitle,
     f.bookingBlock(b),
     `${t.total}: ${f.money(b.totalSatang)}${by ? ` · ${t.paidBy}: ${by}` : ""}`,
+    ...depositLines(f, b, true),
   ].join("\n");
 }
 
@@ -452,6 +473,7 @@ export function newBookingText(f: LineFormatter, b: MsgBooking, link: string | n
     t.newBookingTitle,
     f.bookingBlock(b, { contact: true }),
     `${t.total}: ${f.money(b.totalSatang)}`,
+    ...depositLines(f, b, false),
     ...(b.expiresAt ? [`${t.payBy}: ${f.dateTime(b.expiresAt)}`] : []),
     ...(link ? ["", `${t.openAdmin}:`, link] : []),
   ].join("\n");
@@ -466,7 +488,7 @@ export function guestPaymentRejectedText(f: LineFormatter, b: MsgBooking, p: { r
     ...(p.reason ? [`${t.reason}: ${p.reason}`] : []),
     "",
     b.expiresAt ? fill(t.payAgainUntil, { time: f.dateTime(b.expiresAt) }) : t.payAgain,
-    `${t.amount}: ${f.money(b.totalSatang)}`,
+    `${t.amount}: ${f.money(b.depositSatang ?? b.totalSatang)}`,
     ...(p.link ? [`${t.viewBooking}: ${p.link}`] : []),
     ...(p.siteName ? ["", p.siteName] : []),
   ].join("\n");
@@ -495,6 +517,7 @@ export function guestConfirmedText(f: LineFormatter, b: MsgBooking, p: { siteNam
     "",
     f.bookingBlock(b, { customer: false }),
     `${t.total}: ${f.money(b.totalSatang)}`,
+    ...depositLines(f, b, true),
     ...(p.link ? ["", `${t.viewBooking}: ${p.link}`] : []),
     ...(p.siteName ? ["", p.siteName] : []),
   ].join("\n");
@@ -511,6 +534,8 @@ export function guestCheckinText(
     fill(t.guestHello, { name: b.customerName }),
     "",
     f.bookingBlock(b, { customer: false }),
+    // Deposit plan: what to bring for check-in.
+    ...(b.depositSatang && b.bookingStatus === "CONFIRMED" ? [`${t.balanceAtCheckIn}: ${f.money(Math.max(0, b.totalSatang - b.depositSatang))}`] : []),
     ...(p.address || p.mapUrl || p.phone ? [""] : []),
     ...(p.address ? [`${t.address}: ${p.address}`] : []),
     ...(p.mapUrl ? [`${t.map}: ${p.mapUrl}`] : []),

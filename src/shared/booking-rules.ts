@@ -30,3 +30,24 @@ export function parseBahtToSatang(input: string): number | null {
   const [whole, frac = ""] = clean.split(".");
   return Number(whole) * SATANG_PER_BAHT + Number(frac.padEnd(2, "0"));
 }
+
+/** How a stay is paid: all now, or half of the stay now and the rest at reception before check-in (migration 0025). */
+export const PAYMENT_MODES = ["FULL", "DEPOSIT_50"] as const;
+export type PaymentMode = (typeof PAYMENT_MODES)[number];
+
+/**
+ * Amount asked online to confirm a DEPOSIT_50 booking: everything except half of the stay (accommodation + tarp
+ * area). The half left for check-in is rounded down to whole baht, so the deposit is never less than half; food is
+ * paid in full now. null = nothing would be left for later (pay the full total).
+ */
+export function depositDue(mode: PaymentMode, accommodationSubtotalSatang: number, totalSatang: number): number | null {
+  if (mode !== "DEPOSIT_50") return null;
+  const later = Math.min(Math.floor(accommodationSubtotalSatang / 2 / SATANG_PER_BAHT) * SATANG_PER_BAHT, totalSatang);
+  const now = totalSatang - later;
+  return later > 0 && now > 0 ? now : null;
+}
+
+/** What a booking still owes: the total minus money received (verified / paid payments, never below zero). */
+export function balanceDue(totalSatang: number, paidSatang: number): number {
+  return Math.max(0, totalSatang - paidSatang);
+}

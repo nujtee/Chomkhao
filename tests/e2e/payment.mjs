@@ -297,6 +297,62 @@ await check("PayPal declined → nothing taken, the guest can choose again", asy
   await req.post(`${BASE}/__e2e/paypal/mode`, { data: { mode: "COMPLETED" } });
 });
 
+await check("deposit: House 02 takes 50%; the guest is asked for the deposit; check-in takes the rest (PromptPay QR / account / cash) in one step", async () => {
+  // Owner: House 02 → Payment → 50% deposit.
+  await pa.goto(`${BASE}/en/admin/houses/dev_house_02`);
+  await pa.getByLabel("Payment", { exact: true }).selectOption("DEPOSIT_50");
+  await pa.getByText("Deposit = half of the stay (tarp area included) plus food in full. Applies to new bookings only.").waitFor();
+  await pa.locator("form.adm-card").first().getByRole("button", { name: "Save" }).click();
+  await pa.getByText("Saved").first().waitFor();
+  const unit = (await (await req.get(`${BASE}/api/admin/accommodations/dev_house_02`)).json()).data;
+  assert(unit.paymentMode === "DEPOSIT_50", `mode ${unit.paymentMode}`);
+
+  // Guest books tonight + tomorrow: asked for the deposit, told the rest is paid at check-in.
+  const D = await book({ checkIn: day(0), checkOut: day(2), stay: { kind: "UNIT", unitId: "dev_house_02" } }, "0865555555");
+  assert(D.depositSatang > 0 && D.depositSatang < D.totalSatang, JSON.stringify([D.depositSatang, D.totalSatang]));
+  const baht = (s) => `฿${(s / 100).toLocaleString("en-US")}`;
+  const later = D.totalSatang - D.depositSatang;
+  await pg.goto(`${BASE}/th/booking/lookup?code=${D.bookingCode}`);
+  await pg.locator("#lk-phone").fill("0865555555");
+  await pg.locator("form button[type=submit]").click();
+  await pg.locator(".pay__amount", { hasText: "ยอดมัดจำที่ต้องชำระตอนนี้" }).getByText(baht(D.depositSatang)).waitFor();
+  await pg.getByText(`ส่วนที่เหลือ ${baht(later)} ชำระที่หน้าที่พักตอนเช็กอิน (เงินสด พร้อมเพย์ หรือโอน)`).waitFor();
+  await pg.locator(".summary__line--due", { hasText: "มัดจำ ชำระตอนนี้" }).waitFor();
+  if (SHOTS) await pg.screenshot({ path: `${SHOTS}/deposit-guest-payment.png`, fullPage: true });
+
+  // Staff record the deposit (the form is filled in with it); check-in then opens the balance dialog.
+  await pa.goto(`${BASE}/en/admin/bookings/${D.bookingCode}`);
+  await pa.getByText(`Record the ${baht(D.depositSatang)} deposit; the rest is taken at check-in.`).waitFor();
+  if ((await pa.getByLabel("Amount (THB)").inputValue()) !== String(D.depositSatang / 100)) throw new Error("amount not the deposit");
+  await pa.getByRole("button", { name: "Record payment received" }).click();
+  await pa.locator("dialog[open]").getByRole("button", { name: "Record payment received" }).click();
+  await pa.getByText("Still due").waitFor();
+  await pa.locator(".adm-deposit .adm-due", { hasText: baht(later) }).waitFor();
+  const stay = pa.getByRole("group", { name: "Stay" });
+  await stay.getByText(`${baht(later)} due`).waitFor();
+  await stay.getByRole("button", { name: "Check in" }).click();
+  const dialog = pa.locator("dialog[open]");
+  await dialog.getByRole("heading", { name: "Take the balance before check-in" }).waitFor();
+  await dialog.locator(".adm-balance__due", { hasText: baht(later) }).waitFor();
+  await dialog.getByRole("img", { name: `PromptPay QR ${baht(later)}` }).waitFor();
+  await pa.screenshot({ path: `${SHOTS}/deposit-checkin-qr.png` });
+  await dialog.getByText("Bank transfer", { exact: true }).click();
+  await dialog.getByText("000-0-00000-0").waitFor();
+  await dialog.getByText("Cash", { exact: true }).click();
+  await dialog.getByRole("button", { name: "Cash received" }).click();
+  await dialog.getByText(`Confirm you received ${baht(later)} (Cash) and check in ${D.bookingCode}?`).waitFor();
+  await dialog.getByRole("button", { name: "Confirm payment and check in" }).click();
+  await pa.getByText(`${D.bookingCode}: ${baht(later)} received and checked in`).waitFor();
+  await pa.locator(".adm-pagehead").getByText("Checked in").waitFor();
+  await pa.locator(".adm-deposit").getByText("Paid in full").waitFor();
+  const after = (await (await req.get(`${BASE}/api/admin/bookings/${D.bookingCode}`)).json()).data;
+  assert(after.paidSatang === after.totalSatang && after.balanceSatang === 0 && after.payments.length === 2, JSON.stringify([after.paidSatang, after.balanceSatang, after.payments.length]));
+  await pa.screenshot({ path: `${SHOTS}/deposit-checked-in.png`, fullPage: true });
+
+  // Back to full payment for anything after this check.
+  await req.patch(`${BASE}/api/admin/accommodations/dev_house_02`, { headers: H, data: { paymentMode: "FULL" } });
+});
+
 console.log("console errors:", consoleErrors.length, consoleErrors.slice(0, 5));
 await check("no CSP violations or page errors", async () => {
   const bad = consoleErrors.filter((e) => /Content Security Policy|Refused to|pageerror/i.test(e));

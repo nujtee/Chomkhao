@@ -1,4 +1,5 @@
 import { maskEmailHalf, maskPhoneHalf } from "../../shared/booking-types.ts";
+import { withFallback } from "./schema-fallback.ts";
 import type { D1DatabaseLike, D1PreparedStatementLike } from "../env.ts";
 import type { MsgBooking, MsgFood } from "../line/line-templates.ts";
 
@@ -513,12 +514,17 @@ export class LineRepository {
   /** Bookings with their stay and food lines, for message texts (category names in `lang`). */
   async messageBookings(ids: string[], lang: string): Promise<MsgBooking[]> {
     if (!ids.length) return [];
+    // The cron sends these: before migration 0025 every booking reads as "no deposit".
+    return withFallback(() => this.messageBookingsWith(ids, lang, "deposit_satang"), () => this.messageBookingsWith(ids, lang, "NULL"));
+  }
+
+  private async messageBookingsWith(ids: string[], lang: string, deposit: string): Promise<MsgBooking[]> {
     const list = JSON.stringify(ids);
     const [b, items, food] = await this.db.batch([
       this.db
         .prepare(
           `SELECT id, booking_code, customer_name, customer_phone, customer_email, check_in, check_out, nights, adults, children, booking_status,
-                  payment_status, total_satang, cancel_reason, expires_at, created_at
+                  payment_status, total_satang, ${deposit} AS deposit_satang, cancel_reason, expires_at, created_at
              FROM bookings WHERE id IN (SELECT value FROM json_each(?1)) ORDER BY check_in, booking_code`,
         )
         .bind(list),
@@ -543,7 +549,7 @@ export class LineRepository {
     ]);
     type B = {
       id: string; booking_code: string; customer_name: string; customer_phone: string; customer_email: string | null; check_in: string; check_out: string; nights: number; adults: number; children: number;
-      booking_status: string; payment_status: string; total_satang: number; cancel_reason: string | null; expires_at: string | null; created_at: string;
+      booking_status: string; payment_status: string; total_satang: number; deposit_satang: number | null; cancel_reason: string | null; expires_at: string | null; created_at: string;
     };
     type I = { booking_id: string; item_type: MsgBooking["itemType"]; quantity: number; unit_name_snapshot: string; tarps: number };
     type F = { booking_id: string; service_date: string; option_name_snapshot: string; quantity: number; service_time: string | null; category: string };
@@ -563,7 +569,7 @@ export class LineRepository {
         itemType: item?.item_type ?? "HOUSE", itemName: item?.unit_name_snapshot ?? "—", tents: item?.item_type === "OWN_TENT" ? item.quantity : 0,
         tarps: item?.item_type === "OWN_TENT" ? item.tarps : 0,
         adults: r.adults, children: r.children, bookingStatus: r.booking_status, paymentStatus: r.payment_status,
-        totalSatang: r.total_satang, food: foodBy.get(r.id) ?? [],
+        totalSatang: r.total_satang, depositSatang: r.deposit_satang, food: foodBy.get(r.id) ?? [],
         cancelReason: r.cancel_reason, expiresAt: r.booking_status === "PENDING" ? r.expires_at : null, createdAt: r.created_at,
       };
     });

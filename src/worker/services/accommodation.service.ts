@@ -10,6 +10,7 @@ import type {
   UnitTranslationDto,
   UnitType,
 } from "../../shared/accommodation-types.ts";
+import type { PaymentMode } from "../../shared/booking-rules.ts";
 import { DEFAULT_TIMEZONE, todayIn } from "../../shared/dates.ts";
 import { DEFAULT_LOCALE_CODE, parseLocale, type Locale, type LocaleCode } from "../../shared/i18n/locales.ts";
 import type { D1DatabaseLike, D1PreparedStatementLike, R2BucketLike } from "../env.ts";
@@ -31,6 +32,7 @@ export interface UnitInput {
   unitType: UnitType;
   slug: string;
   basePriceSatang: number;
+  paymentMode: PaymentMode;
   standardGuests: number;
   maxGuests: number;
   maxAdults: number | null;
@@ -177,6 +179,7 @@ export class AccommodationService {
       unitType: u.unit_type,
       slug: u.slug,
       basePriceSatang: u.base_price_satang,
+      paymentMode: u.payment_mode ?? "FULL",
       standardGuests: u.standard_guests,
       maxGuests: u.max_guests,
       maxAdults: u.max_adults,
@@ -231,6 +234,7 @@ export class AccommodationService {
       unitCode: patch.unitCode ?? current.unitCode,
       slug: patch.slug ?? current.slug,
       basePriceSatang: patch.basePriceSatang ?? current.basePriceSatang,
+      paymentMode: patch.paymentMode ?? current.paymentMode,
       standardGuests: patch.standardGuests ?? current.standardGuests,
       maxGuests: patch.maxGuests ?? current.maxGuests,
       maxAdults: patch.maxAdults === undefined ? current.maxAdults : patch.maxAdults,
@@ -242,7 +246,9 @@ export class AccommodationService {
     if (next.status === "ACTIVE" && !current.translations[DEFAULT_LOCALE_CODE]?.name) {
       throw new ValidationError({ status: "ADD_TRANSLATION_BEFORE_ACTIVATING" });
     }
+    // How guests pay is a money decision too: the same permission as the price.
     const priceChanged = next.basePriceSatang !== current.basePriceSatang;
+    if (next.paymentMode !== current.paymentMode) await this.authz.requirePermission(actor, "pricing.edit", meta);
     if (priceChanged) await this.authz.requirePermission(actor, "pricing.edit", meta);
     await this.assertUnique(next.unitCode, next.slug, id);
 
@@ -468,7 +474,7 @@ function toTranslationDto(t: UnitTranslationRow): UnitTranslationDto {
 
 function pickUnitFields(u: AdminUnitDto) {
   return {
-    unitCode: u.unitCode, slug: u.slug, basePriceSatang: u.basePriceSatang, standardGuests: u.standardGuests,
+    unitCode: u.unitCode, slug: u.slug, basePriceSatang: u.basePriceSatang, paymentMode: u.paymentMode, standardGuests: u.standardGuests,
     maxGuests: u.maxGuests, maxAdults: u.maxAdults, status: u.status, sortOrder: u.sortOrder,
   };
 }

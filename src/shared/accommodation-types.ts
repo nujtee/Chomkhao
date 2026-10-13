@@ -1,5 +1,6 @@
 /** Accommodation / camping / availability API contract (Worker ↔ UI). */
 import type { LocaleCode } from "./i18n/locales.ts";
+import type { PaymentMode } from "./booking-rules.ts";
 
 export type UnitType = "HOUSE" | "VIP_TENT";
 export type UnitStatus = "DRAFT" | "ACTIVE" | "INACTIVE" | "MAINTENANCE" | "DELETED";
@@ -46,6 +47,8 @@ export interface AdminUnitDto {
   unitType: UnitType;
   slug: string;
   basePriceSatang: number;
+  /** FULL, or DEPOSIT_50 = guests pay half of the stay online and the rest before check-in. */
+  paymentMode: PaymentMode;
   standardGuests: number;
   maxGuests: number;
   maxAdults: number | null;
@@ -160,6 +163,8 @@ export interface CampingSettingsDto {
   tarpEnabled: boolean;
   tarpPricePerNightSatang: number;
   maxTarpsPerNight: number;
+  /** FULL, or DEPOSIT_50 = guests pay half of the stay online and the rest before check-in. */
+  paymentMode: PaymentMode;
   translations: Partial<Record<LocaleCode, { name: string; description: string | null; seoTitle: string | null; seoDescription: string | null }>>;
 }
 

@@ -13,6 +13,7 @@ import { addMs, iso, type AuthContext, type Clock, type RequestMeta } from "./au
 import type { AuthorizationService } from "./authorization.service.ts";
 import type { BookingService } from "./booking.service.ts";
 import type { SecurityLogService } from "./security-log.service.ts";
+import { dueOnline } from "./booking-money.ts";
 import type { OutboxLike } from "./marketing.service.ts";
 
 export const SLIP_LIMITS = {
@@ -106,7 +107,8 @@ export class SlipService {
       const results = await this.db.batch([
         this.repo.claimForSlipStatement(booking.id, at),
         this.repo.insertSlipAssetStatement({ id: assetId, bookingId: booking.id, key, mime: image.mime, size: bytes.length, width: image.width, height: image.height, sha256, now: at }),
-        this.repo.insertSlipPaymentStatement({ id: paymentId, bookingId: booking.id, amount: booking.total_satang, assetId, sha256, channel, now: at }),
+        // The deposit on a deposit plan, else the whole total: what the slip must show.
+        this.repo.insertSlipPaymentStatement({ id: paymentId, bookingId: booking.id, amount: dueOnline(booking), assetId, sha256, channel, now: at }),
         this.log.eventStatement("SLIP_UPLOADED", "INFO", meta, { identifier: booking.booking_code }),
         ...(this.outbox ? await this.outbox.slipSubmitted(paymentId, booking.id, at) : []),
       ]);

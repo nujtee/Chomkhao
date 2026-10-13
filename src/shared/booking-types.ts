@@ -118,6 +118,11 @@ export interface QuoteDto {
   discountSatang: number;
   totalSatang: number;
   currency: string;
+  /**
+   * Deposit plan (the house / tent / camping asks for half of the stay now): the amount paid online to confirm.
+   * The rest (totalSatang − depositSatang) is paid at reception before check-in. null = pay the full total now.
+   */
+  depositSatang: number | null;
 }
 
 export interface PublicBookingDto extends QuoteDto {
@@ -132,6 +137,10 @@ export interface PublicBookingDto extends QuoteDto {
   /** LINE updates for this booking (Phase 11): offered when the property has it on; linked = guest opted in. */
   lineUpdates: GuestLineDto;
   /** Where and how much to pay — present only while the booking awaits payment. */
+  /** Money received (verified / paid payments, before refunds). */
+  paidSatang: number;
+  /** Still to pay: total − paid. For a confirmed deposit booking, the amount due at check-in. */
+  balanceSatang: number;
   paymentInstructions: PaymentInstructionsDto | null;
   /** Why the last payment was not accepted (shown while the guest can pay again). */
   paymentRejectedReason: string | null;
@@ -157,6 +166,10 @@ export interface AdminBookingSummaryDto {
   customerName: string;
   customerPhone: string;
   totalSatang: number;
+  /** Deposit plan: amount asked online; null = full payment. */
+  depositSatang: number | null;
+  /** Still to pay (total − verified / paid payments). */
+  balanceSatang: number;
   expiresAt: string | null;
   createdAt: string;
   /** Check-in / check-out / no-show today (see shared/stay.ts). */

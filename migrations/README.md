@@ -26,6 +26,7 @@
 | `0022_d1_glob_limits.sql` | **table rebuild (announced)**: `bookings`, `home_slides`, `booking_cta_settings` re-created with the same columns, indexes and triggers; only three CHECKs rewritten (booking code, `#RRGGBB` colours) because D1 refuses LIKE/GLOB patterns over 50 bytes ("pattern too complex" — every booking insert failed). Production: all three tables were empty; rollback = D1 Time Travel |
 | `0023_payment_channels_email.sql` | payment step: `payment_settings` (Auto / Manual slip approval, channels PromptPay / bank / QR / PayPal — seeded row), `payments.channel` (ADD COLUMN, nullable, frozen by trigger), `paypal_orders` (PayPal Checkout: claim → capture → settle; money fields frozen, CAPTURED final), `line_recipients.notify_booking` (ADD COLUMN, default on), e-mail: `email_settings` (seeded, off), `email_recipients`, `email_logs` (outbox, SENT final) — additive only, no data change |
 | `0024_admin_menu.sql` | Administration → Menu: `admin_menu_hidden` (sidebar items hidden for everyone; empty = all shown) and the permission `settings.admin_menu` for SUPER_ADMIN — additive only |
+| `0025_deposit.sql` | deposit plan: `accommodation_units.payment_mode` and `camping_settings.payment_mode` (`FULL` / `DEPOSIT_50`, ADD COLUMN default `FULL`), `bookings.deposit_satang` (amount asked online; NULL = full payment; frozen by trigger), trigger `trg_bookings_checkin_paid` (a deposit booking cannot be checked in while money is due) — additive only, no data change |
 
 ## Commands
 

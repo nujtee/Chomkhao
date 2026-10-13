@@ -13,6 +13,8 @@ export interface CampingSettingsRow {
   tarp_enabled: number;
   tarp_price_per_night_satang: number;
   max_tarps_per_night: number;
+  /** FULL | DEPOSIT_50 (migration 0025). */
+  payment_mode: "FULL" | "DEPOSIT_50";
 }
 
 export interface CampingTranslationRow {
@@ -99,7 +101,7 @@ export class InventoryRepository {
         .prepare(
           `SELECT c.is_enabled, c.max_tents_per_night, c.price_per_adult_night_satang, c.child_free_under_age,
                   c.max_guests_per_tent, c.cover_asset_id, m.object_key AS cover_key, m.width AS cover_width, m.height AS cover_height,
-                  c.tarp_enabled, c.tarp_price_per_night_satang, c.max_tarps_per_night
+                  c.tarp_enabled, c.tarp_price_per_night_satang, c.max_tarps_per_night, c.payment_mode
              FROM camping_settings c
              LEFT JOIN media_assets m ON m.id = c.cover_asset_id AND m.status = 'ACTIVE' AND m.bucket = 'PUBLIC'
             WHERE c.id = 1`,
@@ -112,7 +114,7 @@ export class InventoryRepository {
         .prepare(
           `SELECT c.is_enabled, c.max_tents_per_night, c.price_per_adult_night_satang, c.child_free_under_age,
                   c.max_guests_per_tent, c.cover_asset_id, m.object_key AS cover_key, m.width AS cover_width, m.height AS cover_height,
-                  0 AS tarp_enabled, 0 AS tarp_price_per_night_satang, 0 AS max_tarps_per_night
+                  0 AS tarp_enabled, 0 AS tarp_price_per_night_satang, 0 AS max_tarps_per_night, 'FULL' AS payment_mode
              FROM camping_settings c
              LEFT JOIN media_assets m ON m.id = c.cover_asset_id AND m.status = 'ACTIVE' AND m.bucket = 'PUBLIC'
             WHERE c.id = 1`,
@@ -131,21 +133,23 @@ export class InventoryRepository {
   upsertCampingSettingsStatement(s: {
     isEnabled: boolean; maxTentsPerNight: number; pricePerAdultNightSatang: number; childFreeUnderAge: number;
     maxGuestsPerTent: number | null; coverAssetId: string | null; tarpEnabled: boolean; tarpPricePerNightSatang: number;
-    maxTarpsPerNight: number; updatedBy: string; now: string;
+    maxTarpsPerNight: number; paymentMode: string; updatedBy: string; now: string;
   }): D1PreparedStatementLike {
     return this.db
       .prepare(
         `INSERT INTO camping_settings (id, is_enabled, max_tents_per_night, price_per_adult_night_satang, child_free_under_age,
-           max_guests_per_tent, cover_asset_id, updated_at, updated_by, tarp_enabled, tarp_price_per_night_satang, max_tarps_per_night)
-         VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+           max_guests_per_tent, cover_asset_id, updated_at, updated_by, tarp_enabled, tarp_price_per_night_satang, max_tarps_per_night,
+           payment_mode)
+         VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
          ON CONFLICT (id) DO UPDATE SET is_enabled = excluded.is_enabled, max_tents_per_night = excluded.max_tents_per_night,
            price_per_adult_night_satang = excluded.price_per_adult_night_satang, child_free_under_age = excluded.child_free_under_age,
            max_guests_per_tent = excluded.max_guests_per_tent, cover_asset_id = excluded.cover_asset_id,
            updated_at = excluded.updated_at, updated_by = excluded.updated_by, tarp_enabled = excluded.tarp_enabled,
-           tarp_price_per_night_satang = excluded.tarp_price_per_night_satang, max_tarps_per_night = excluded.max_tarps_per_night`,
+           tarp_price_per_night_satang = excluded.tarp_price_per_night_satang, max_tarps_per_night = excluded.max_tarps_per_night,
+           payment_mode = excluded.payment_mode`,
       )
       .bind(s.isEnabled ? 1 : 0, s.maxTentsPerNight, s.pricePerAdultNightSatang, s.childFreeUnderAge, s.maxGuestsPerTent,
-        s.coverAssetId, s.now, s.updatedBy, s.tarpEnabled ? 1 : 0, s.tarpPricePerNightSatang, s.maxTarpsPerNight);
+        s.coverAssetId, s.now, s.updatedBy, s.tarpEnabled ? 1 : 0, s.tarpPricePerNightSatang, s.maxTarpsPerNight, s.paymentMode);
   }
 
   /** New tarp-area capacity for every night from `fromDate` (no per-night overrides); CHECK aborts if below areas sold. */

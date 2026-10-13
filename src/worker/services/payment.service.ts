@@ -13,6 +13,7 @@ import { iso, type AuthContext, type Clock, type RequestMeta } from "./auth-cont
 import type { AuthorizationService } from "./authorization.service.ts";
 import { publicMediaUrl } from "./media-url.ts";
 import type { SecurityLogService } from "./security-log.service.ts";
+import { dueOnline } from "./booking-money.ts";
 import type { OutboxLike } from "./marketing.service.ts";
 
 export function toPaymentDto(p: PaymentRow): PaymentDto {
@@ -265,8 +266,9 @@ export class PaymentService {
     if (booking.expires_at && booking.expires_at <= iso(now) && booking.payment_status === "UNPAID") {
       throw new ConflictError("The payment time for this booking has expired", "BOOKING_NOT_PAYABLE");
     }
-    if (input.amountSatang !== booking.total_satang) {
-      throw new ValidationError({ amountSatang: "MUST_EQUAL_TOTAL" });
+    // Online-stage payment: the deposit on a deposit plan (the rest is taken at check-in), else the whole total.
+    if (input.amountSatang !== dueOnline(booking)) {
+      throw new ValidationError({ amountSatang: booking.deposit_satang === null ? "MUST_EQUAL_TOTAL" : "MUST_EQUAL_DEPOSIT" });
     }
     if (input.paidAt > iso(now)) throw new ValidationError({ paidAt: "IN_THE_FUTURE" });
     const at = iso(now);

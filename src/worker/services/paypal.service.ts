@@ -10,6 +10,7 @@ import { addMs, iso, type AuthContext, type Clock, type RequestMeta } from "./au
 import type { BookingService } from "./booking.service.ts";
 import type { OutboxLike } from "./marketing.service.ts";
 import type { SecurityLogService } from "./security-log.service.ts";
+import { dueOnline } from "./booking-money.ts";
 
 export const PAYPAL_LIMITS = {
   ordersPerBookingPerHour: 10,
@@ -69,7 +70,8 @@ export class PaypalService {
       requestId: `order-${newId()}`,
       bookingId: booking.id,
       bookingCode: booking.booking_code,
-      amountSatang: booking.total_satang,
+      // The deposit on a deposit plan, else the whole total.
+      amountSatang: dueOnline(booking),
       description: `Booking ${booking.booking_code}`,
       brandName: await this.config.siteName(locale.code).catch(() => null),
       locale: PAYPAL_LOCALE[locale.code] ?? "en-US",
@@ -83,7 +85,7 @@ export class PaypalService {
         undefined, `${this.api.environment}: ${result.error}`);
     }
     await this.db.batch([
-      this.repo.insertPaypalOrderStatement({ id: result.orderId, bookingId: booking.id, amount: booking.total_satang, environment: this.api.environment, now: at }),
+      this.repo.insertPaypalOrderStatement({ id: result.orderId, bookingId: booking.id, amount: dueOnline(booking), environment: this.api.environment, now: at }),
       this.repo.cancelOtherPaypalOrdersStatement(booking.id, result.orderId, at),
       this.log.eventStatement("PAYPAL_ORDER_CREATED", "INFO", meta, { identifier: booking.booking_code }),
     ]);
@@ -142,7 +144,7 @@ export class PaypalService {
     if (order.status === "CREATED") {
       const now = iso(this.clock());
       // Both statements hold or neither does (the second is conditional on the first).
-      const claimed = booking.total_satang === order.amount_satang ? await this.db.batch([
+      const claimed = dueOnline(booking) === order.amount_satang ? await this.db.batch([
         this.repo.markPaypalCapturingStatement({ id: order.id, bookingId: booking.id, now }),
         this.repo.claimForPaypalStatement({ id: order.id, bookingId: booking.id, now }),
       ]) : null;

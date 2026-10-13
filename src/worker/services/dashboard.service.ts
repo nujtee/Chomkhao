@@ -1,4 +1,5 @@
 import { stayActions } from "../../shared/stay.ts";
+import { balanceDue } from "../../shared/booking-rules.ts";
 import type { BookingStatus, PaymentStatus } from "../../shared/booking-types.ts";
 import type { CalendarDto, DashboardDto, RevenueDto, StayRowDto } from "../../shared/dashboard-types.ts";
 import { CALENDAR_MAX_DAYS } from "../../shared/dashboard-types.ts";
@@ -200,6 +201,8 @@ function stayRow(r: BookingItemListRow, today: string): StayRowDto {
     status: r.booking_status as BookingStatus,
     paymentStatus: r.payment_status as PaymentStatus,
     totalSatang: r.total_satang,
+    balanceSatang: balanceDue(r.total_satang, r.paid_satang),
+    depositSatang: r.deposit_satang,
     stayActions: stayActions(r.booking_status, r.check_in, r.check_out, today),
   };
 }

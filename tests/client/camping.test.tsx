@@ -63,6 +63,7 @@ describe("booking summary with a tarp area", () => {
     },
     tarp: { quantity: 1, pricePerNightSatang: 15000, nights: 2, subtotalSatang: 30000 },
     includedMeals: [], food: [], accommodationSubtotalSatang: 130000, foodSubtotalSatang: 0, discountSatang: 0, totalSatang: 130000, currency: "THB",
+    depositSatang: null,
   };
 
   it("shows tents + tarp, the tarp line and a total that includes it", () => {
@@ -72,6 +73,18 @@ describe("booking summary with a tarp area", () => {
     assert.match(html, /<dt>ค่าที่พัก<\/dt><dd>฿1,300<\/dd>/);
     assert.match(html, /<dt>ยอดรวม<\/dt><dd>฿1,300<\/dd>/);
     assert.doesNotMatch(wrap(<BookingSummary quote={{ ...quote, tarp: null, accommodationSubtotalSatang: 100000, totalSatang: 100000 }} />), /ทาร์ป/);
+  });
+
+  it("deposit plan: what is paid now and at check-in; once the deposit is in, what is paid and still due", () => {
+    const quoted = wrap(<BookingSummary quote={{ ...quote, depositSatang: 65000 }} />);
+    assert.match(quoted, /<dt>มัดจำ ชำระตอนนี้<\/dt><dd>฿650<\/dd>/);
+    assert.match(quoted, /<dt>ส่วนที่เหลือ ชำระวันเช็กอิน<\/dt><dd>฿650<\/dd>/);
+    assert.match(quoted, /ที่พักนี้ชำระมัดจำ 50% ของค่าที่พัก/);
+    const paid = wrap(<BookingSummary quote={{ ...quote, depositSatang: 65000, paidSatang: 65000, balanceSatang: 65000 } as QuoteDto} />, "en");
+    assert.match(paid, /<dt>Paid<\/dt><dd>฿650<\/dd>/);
+    assert.match(paid, /<dt>Balance, pay at check-in<\/dt><dd>฿650<\/dd>/);
+    assert.match(wrap(<BookingSummary quote={{ ...quote, depositSatang: 65000, paidSatang: 130000, balanceSatang: 0 } as QuoteDto} />), /<dt>ชำระครบแล้ว<\/dt><dd>฿1,300<\/dd>/);
+    assert.doesNotMatch(wrap(<BookingSummary quote={quote} />), /มัดจำ/);
   });
 
   it("analytics items carry the tarp area (ids and prices only)", () => {

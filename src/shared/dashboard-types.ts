@@ -20,6 +20,10 @@ export interface StayRowDto {
   status: BookingStatus;
   paymentStatus: PaymentStatus;
   totalSatang: number;
+  /** Still to pay (deposit plan: the rest, taken at check-in); 0 when paid in full. */
+  balanceSatang: number;
+  /** Deposit plan: amount asked online; null = full payment. */
+  depositSatang: number | null;
   /** Check-in / check-out / no-show today (see shared/stay.ts). */
   stayActions: StayActionsDto;
 }

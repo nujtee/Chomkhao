@@ -295,6 +295,24 @@ export class PaymentRepository {
       .bind(p.id, p.bookingId, p.amount, p.method, p.reference, p.note, p.paidAt, p.by, p.now);
   }
 
+  /**
+   * The rest of a deposit booking, taken at reception (staff confirm the cash / transfer). Inserted only while the
+   * booking is confirmed and still owes exactly this amount, so a double click or two desks cannot take it twice.
+   */
+  insertBalancePaymentStatement(p: { id: string; bookingId: string; amount: number; method: string; reference: string | null; by: string; now: string }): D1PreparedStatementLike {
+    return this.db
+      .prepare(
+        `INSERT INTO payments (id, booking_id, amount_satang, method, status, reference, note, paid_at, submitted_at,
+           verified_at, verified_by, updated_at)
+         SELECT ?1, ?2, ?3, ?4, 'PAID', ?5, NULL, ?7, ?7, ?7, ?6, ?7
+          WHERE EXISTS (SELECT 1 FROM bookings b WHERE b.id = ?2 AND b.booking_status = 'CONFIRMED'
+                          AND b.total_satang - (SELECT COALESCE(SUM(q.amount_satang), 0) FROM payments q
+                                                 WHERE q.booking_id = b.id AND q.status IN ('VERIFIED', 'PAID')) = ?3)
+         RETURNING id`,
+      )
+      .bind(p.id, p.bookingId, p.amount, p.method, p.reference, p.by, p.now);
+  }
+
   refundStatement(paymentId: string, bookingId: string, amount: number, reason: string, by: string, now: string): D1PreparedStatementLike {
     return this.db
       .prepare(

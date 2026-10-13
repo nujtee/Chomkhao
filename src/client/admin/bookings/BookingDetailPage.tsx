@@ -82,7 +82,7 @@ export function BookingDetailPage({ code }: { code: string }) {
           <h2 className="adm-h2" id="stay-h">{c.stay.title}</h2>
           {b.status === "PENDING"
             ? <p className="adm-muted">{c.stay.needConfirmed}</p>
-            : <StayButtons code={b.bookingCode} checkIn={b.checkIn} actions={b.stayActions} onDone={stayChanged} />}
+            : <StayButtons code={b.bookingCode} checkIn={b.checkIn} actions={b.stayActions} balanceSatang={b.status === "CONFIRMED" ? b.balanceSatang : 0} onDone={stayChanged} />}
         </div>
       )}
       {error && <Alert kind="error">{error}</Alert>}

@@ -50,9 +50,11 @@ const SLIP: readonly PaymentChannel[] = ["PROMPTPAY", "BANK_TRANSFER", "QR_CODE"
  * `slip(channel)` renders the slip form for the chosen slip channel.
  */
 export function PaymentInstructions({
-  payment, expiresAt, bookingCode, phone, slip,
+  payment, expiresAt, bookingCode, phone, slip, laterSatang = 0,
 }: {
   payment: PaymentInstructionsDto;
+  /** Deposit plan: what is left for check-in (0 = the amount due is everything). */
+  laterSatang?: number;
   expiresAt: string | null;
   bookingCode: string;
   phone: string;
@@ -98,9 +100,10 @@ export function PaymentInstructions({
     <section className="pay" aria-labelledby={`${id}-h`}>
       <h2 id={`${id}-h`} className="pay__title">{bt.payTitle}</h2>
       <p className="pay__amount">
-        <span>{bt.amountDue}</span>
+        <span>{laterSatang > 0 ? bt.amountDueDeposit : bt.amountDue}</span>
         <strong>{amount}</strong>
       </p>
+      {laterSatang > 0 && <p className="pay__later">{fill(bt.payLaterNote, { amount: formatBaht(laterSatang, locale.code) })}</p>}
       {expiresAt && (
         <p className="pay__deadline">
           {fill(bt.pay.deadline, { time: timeText(expiresAt) })}

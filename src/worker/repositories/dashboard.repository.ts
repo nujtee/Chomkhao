@@ -1,18 +1,23 @@
 import type { D1DatabaseLike } from "../env.ts";
+import { PAID_SQL } from "./booking.repository.ts";
+import { withFallback } from "./schema-fallback.ts";
 
 /** Statuses that count as a sale once paid (spec §26). */
 const SOLD = "('CONFIRMED', 'CHECKED_IN', 'CHECKED_OUT', 'NO_SHOW')";
 const PAID = "('PAID', 'VERIFIED')";
 
 /** One booking with its (first) item, as used by dashboard lists and the calendar. */
-const BOOKING_WITH_ITEM = `
+const bookingWithItem = (deposit: string) => `
   SELECT b.booking_code, b.customer_name, b.check_in, b.check_out, b.nights, b.adults, b.children,
-         b.booking_status, b.payment_status, b.total_satang,
+         b.booking_status, b.payment_status, b.total_satang, ${deposit} AS deposit_satang, ${PAID_SQL} AS paid_satang,
          i.item_type, i.unit_id, i.quantity, s.unit_name_snapshot AS item_name,
          (SELECT COALESCE(SUM(t.quantity), 0) FROM booking_tarps t WHERE t.booking_id = b.id) AS tarps
     FROM bookings b
     JOIN booking_items i ON i.id = (SELECT id FROM booking_items WHERE booking_id = b.id ORDER BY created_at, id LIMIT 1)
     JOIN booking_price_snapshots s ON s.booking_item_id = i.id`;
+const BOOKING_WITH_ITEM = bookingWithItem("b.deposit_satang");
+/** Before migration 0025: no booking has a deposit. */
+const BOOKING_WITH_ITEM_LEGACY = bookingWithItem("NULL");
 
 export interface BookingItemListRow {
   booking_code: string;
@@ -25,6 +30,8 @@ export interface BookingItemListRow {
   booking_status: string;
   payment_status: string;
   total_satang: number;
+  deposit_satang: number | null;
+  paid_satang: number;
   item_type: "HOUSE" | "VIP_TENT" | "OWN_TENT";
   unit_id: string | null;
   quantity: number;
@@ -43,24 +50,20 @@ export interface RevenueRow {
 export class DashboardRepository {
   constructor(private readonly db: D1DatabaseLike) {}
 
+  /** Booking-with-item reads, with the pre-0025 columns while that migration is not applied yet. */
+  private async withItems(tail: string, ...binds: unknown[]): Promise<BookingItemListRow[]> {
+    const read = async (select: string) => (await this.db.prepare(`${select}\n${tail}`).bind(...binds).all<BookingItemListRow>()).results;
+    return withFallback(() => read(BOOKING_WITH_ITEM), () => read(BOOKING_WITH_ITEM_LEGACY));
+  }
+
   async arrivals(today: string): Promise<BookingItemListRow[]> {
-    const { results } = await this.db
-      .prepare(`${BOOKING_WITH_ITEM}
-         WHERE b.check_in = ?1 AND b.booking_status IN ('PENDING', 'CONFIRMED', 'CHECKED_IN', 'NO_SHOW')
-         ORDER BY b.booking_status = 'CHECKED_IN', b.booking_code LIMIT 100`)
-      .bind(today)
-      .all<BookingItemListRow>();
-    return results;
+    return this.withItems(`WHERE b.check_in = ?1 AND b.booking_status IN ('PENDING', 'CONFIRMED', 'CHECKED_IN', 'NO_SHOW')
+         ORDER BY b.booking_status = 'CHECKED_IN', b.booking_code LIMIT 100`, today);
   }
 
   async departures(today: string): Promise<BookingItemListRow[]> {
-    const { results } = await this.db
-      .prepare(`${BOOKING_WITH_ITEM}
-         WHERE b.check_out = ?1 AND b.booking_status IN ('CONFIRMED', 'CHECKED_IN', 'CHECKED_OUT')
-         ORDER BY b.booking_status = 'CHECKED_OUT', b.booking_code LIMIT 100`)
-      .bind(today)
-      .all<BookingItemListRow>();
-    return results;
+    return this.withItems(`WHERE b.check_out = ?1 AND b.booking_status IN ('CONFIRMED', 'CHECKED_IN', 'CHECKED_OUT')
+         ORDER BY b.booking_status = 'CHECKED_OUT', b.booking_code LIMIT 100`, today);
   }
 
   async counts(today: string, monthStart: string, offset: string) {
@@ -177,13 +180,8 @@ export class DashboardRepository {
   }
 
   async calendarBookings(from: string, to: string): Promise<BookingItemListRow[]> {
-    const { results } = await this.db
-      .prepare(`${BOOKING_WITH_ITEM}
-         WHERE b.check_in < ?2 AND b.check_out > ?1 AND b.booking_status NOT IN ('CANCELLED', 'EXPIRED')
-         ORDER BY b.check_in, b.booking_code LIMIT 2000`)
-      .bind(from, to)
-      .all<BookingItemListRow>();
-    return results;
+    return this.withItems(`WHERE b.check_in < ?2 AND b.check_out > ?1 AND b.booking_status NOT IN ('CANCELLED', 'EXPIRED')
+         ORDER BY b.check_in, b.booking_code LIMIT 2000`, from, to);
   }
 
   async calendarCamping(from: string, to: string) {

@@ -108,14 +108,21 @@ export function BookingsPage() {
                   {b.itemName}
                   {b.itemType === "OWN_TENT" && <div className="adm-muted">{format(t.bk.tents, { n: b.quantity })}{b.tarps > 0 && ` + ${t.bk.tarp}`}</div>}
                 </td>
-                <td className="adm-num">{formatBaht(b.totalSatang, locale.code)}</td>
+                <td className="adm-num">
+                  {formatBaht(b.totalSatang, locale.code)}
+                  {/* Deposit plan: what is still to be taken at check-in. */}
+                  {b.depositSatang !== null && b.status === "CONFIRMED" && b.balanceSatang > 0 && (
+                    <div className="adm-small adm-due">{format(t.pay.balanceBadge, { amount: formatBaht(b.balanceSatang, locale.code) })}</div>
+                  )}
+                </td>
                 <td>
                   <BookingStatusBadge status={b.status} />
                   <div className="adm-muted adm-small">{t.bk[`p${b.paymentStatus}`]}</div>
                   <StayButtons compact code={b.bookingCode} checkIn={b.checkIn} actions={b.stayActions}
+                    balanceSatang={b.status === "CONFIRMED" ? b.balanceSatang : 0}
                     onDone={(next, message) => {
                       update((rows) => rows.map((r) => (r.bookingCode === next.bookingCode
-                        ? { ...r, status: next.status, paymentStatus: next.paymentStatus, stayActions: next.stayActions } : r)));
+                        ? { ...r, status: next.status, paymentStatus: next.paymentStatus, stayActions: next.stayActions, balanceSatang: next.balanceSatang } : r)));
                       setStayMsg(message);
                     }} />
                 </td>

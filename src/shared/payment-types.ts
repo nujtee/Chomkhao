@@ -62,6 +62,26 @@ export interface ReceivingAccountInput {
   sortOrder: number;
 }
 
+/** Ways staff take the rest of a deposit booking at reception. */
+export const BALANCE_METHODS = ["CASH", "PROMPTPAY", "BANK_TRANSFER"] as const;
+export type BalanceMethod = (typeof BALANCE_METHODS)[number];
+
+/**
+ * Admin → Check in a deposit booking with money still due: what to collect and where (deposit plan, migration 0025).
+ * The account is the current primary receiving account (else the one copied when the booking was made).
+ */
+export interface BalanceDueDto {
+  bookingCode: string;
+  totalSatang: number;
+  /** Received so far (the deposit, …). */
+  paidSatang: number;
+  /** total − paid: what the guest pays now. */
+  balanceSatang: number;
+  account: { bankName: string; accountName: string; accountNumber: string | null; promptpayNumber: string | null; qrUrl: string | null } | null;
+  /** PromptPay Thai QR for exactly the balance; null without a PromptPay number. */
+  promptpayPayload: string | null;
+}
+
 /** How to pay this booking — from the account snapshot taken when the booking was made. */
 export interface PaymentInstructionsDto {
   bankName: string;

@@ -304,6 +304,7 @@ export class AvailabilityService {
       tarpEnabled: s?.tarp_enabled === 1,
       tarpPricePerNightSatang: s?.tarp_price_per_night_satang ?? 0,
       maxTarpsPerNight: s?.max_tarps_per_night ?? 0,
+      paymentMode: s?.payment_mode ?? "FULL",
       translations: Object.fromEntries(translations.map((t) => [t.language_code, {
         name: t.name, description: t.description, seoTitle: t.seo_title, seoDescription: t.seo_description,
       }])),
@@ -312,8 +313,8 @@ export class AvailabilityService {
 
   async updateCampingSettings(
     actor: AuthContext,
-    patch: Omit<CampingSettingsDto, "translations" | "tarpEnabled" | "tarpPricePerNightSatang" | "maxTarpsPerNight">
-      & Partial<Pick<CampingSettingsDto, "tarpEnabled" | "tarpPricePerNightSatang" | "maxTarpsPerNight">>
+    patch: Omit<CampingSettingsDto, "translations" | "tarpEnabled" | "tarpPricePerNightSatang" | "maxTarpsPerNight" | "paymentMode">
+      & Partial<Pick<CampingSettingsDto, "tarpEnabled" | "tarpPricePerNightSatang" | "maxTarpsPerNight" | "paymentMode">>
       & { translations?: CampingSettingsDto["translations"] },
     meta: RequestMeta,
   ): Promise<CampingSettingsDto> {
@@ -325,8 +326,10 @@ export class AvailabilityService {
       tarpEnabled: patch.tarpEnabled ?? current.tarpEnabled,
       tarpPricePerNightSatang: patch.tarpPricePerNightSatang ?? current.tarpPricePerNightSatang,
       maxTarpsPerNight: patch.maxTarpsPerNight ?? current.maxTarpsPerNight,
+      paymentMode: patch.paymentMode ?? current.paymentMode,
     };
-    if (input.pricePerAdultNightSatang !== current.pricePerAdultNightSatang || input.tarpPricePerNightSatang !== current.tarpPricePerNightSatang) {
+    if (input.pricePerAdultNightSatang !== current.pricePerAdultNightSatang || input.tarpPricePerNightSatang !== current.tarpPricePerNightSatang
+      || input.paymentMode !== current.paymentMode) {
       await this.authz.requirePermission(actor, "pricing.edit", meta);
     }
     if (input.tarpEnabled && input.maxTarpsPerNight < 1) throw new ValidationError({ maxTarpsPerNight: "TARP_CAPACITY_REQUIRED" });

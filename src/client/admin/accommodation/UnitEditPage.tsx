@@ -7,6 +7,8 @@ import { ApiError, apiGet, apiRequest } from "../../api/client.ts";
 import { format } from "../../../shared/i18n/admin-messages.ts";
 import { uploadImage } from "../../media/prepareImage.ts";
 import { Link } from "../../router/Router.tsx";
+import type { PaymentMode } from "../../../shared/booking-rules.ts";
+import { PaymentModeField } from "./PaymentModeField.tsx";
 import { useAdmin } from "../AdminContext.tsx";
 import { Alert, Button, ConfirmDialog, detailMessage, errorMessage, Field, fieldErrors } from "../ui.tsx";
 import { amenityCode, nextAmenityCode } from "./amenity-code.ts";
@@ -82,6 +84,7 @@ function BasicsForm({ type, unit, canEdit, onCreated, onSaved, onError }: {
     unitCode: unit?.unitCode ?? "",
     slug: unit?.slug ?? "",
     price: unit ? String(unit.basePriceSatang / SATANG_PER_BAHT) : "",
+    paymentMode: unit?.paymentMode ?? ("FULL" as PaymentMode),
     standardGuests: String(unit?.standardGuests ?? 2),
     maxGuests: String(unit?.maxGuests ?? 2),
     maxAdults: unit?.maxAdults ? String(unit.maxAdults) : "",
@@ -108,6 +111,7 @@ function BasicsForm({ type, unit, canEdit, onCreated, onSaved, onError }: {
       sortOrder: Number(f.sortOrder) || 0,
     };
     if (!unit || price !== unit.basePriceSatang) body.basePriceSatang = price;
+    if (!unit || f.paymentMode !== unit.paymentMode) body.paymentMode = f.paymentMode;
     setBusy(true);
     setErrors({});
     try {
@@ -131,6 +135,7 @@ function BasicsForm({ type, unit, canEdit, onCreated, onSaved, onError }: {
           <Field label={t.acc.slug} required value={f.slug} onChange={set("slug")} hint={t.acc.slugHint} error={errors.slug} maxLength={80} />
           <Field label={t.acc.price} required inputMode="decimal" value={f.price} onChange={set("price")}
             disabled={!canPrice && !!unit} hint={!canPrice ? t.acc.needsPricing : undefined} error={errors.basePriceSatang} />
+          <PaymentModeField id="unit-payment-mode" value={f.paymentMode} error={errors.paymentMode} onChange={(paymentMode) => setF({ ...f, paymentMode })} />
           <div className="adm-field">
             <label htmlFor="unit-status">{t.acc.status}</label>
             <select id="unit-status" value={f.status} onChange={set("status")}>

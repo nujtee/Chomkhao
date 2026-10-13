@@ -29,7 +29,8 @@ export function PaymentPanel({ booking, notice = null, onChanged }: {
   const [message, setMessage] = useState<{ kind: "error" | "success"; text: string } | null>(notice ? { kind: "success", text: notice } : null);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [form, setForm] = useState({
-    amount: String(booking.totalSatang / SATANG_PER_BAHT),
+    // Deposit plan: the deposit is what the booking asks for now; the rest is taken at check-in.
+    amount: String((booking.depositSatang ?? booking.totalSatang) / SATANG_PER_BAHT),
     method: "BANK_TRANSFER" as PaymentMethod,
     paidAt: localDateTimeIn(DEFAULT_TIMEZONE, new Date()),
     reference: "",
@@ -121,6 +122,9 @@ export function PaymentPanel({ booking, notice = null, onChanged }: {
   }
 
   const acc = booking.paymentAccount;
+  const deposit = booking.depositSatang;
+  /** Deposit plan: the first money in is the deposit, later money is the balance taken at check-in. */
+  const firstPaid = booking.payments.find((p) => p.status === "PAID" || p.status === "VERIFIED" || p.status === "REFUNDED")?.id ?? null;
   return (
     <div className="adm-card" id="payment">
       <h2 className="adm-h2">{t.pay.paymentTitle} · <span className="adm-muted">{t.bk[`p${booking.paymentStatus}`]}</span></h2>
@@ -135,6 +139,17 @@ export function PaymentPanel({ booking, notice = null, onChanged }: {
             {acc.promptpayNumber && <> · PromptPay <span className="adm-mono">{acc.promptpayNumber}</span></>}
           </p>
         </div>
+      )}
+
+      {deposit !== null && (
+        <dl className="adm-dl adm-deposit">
+          <dt>{t.pay.plan}</dt>
+          <dd>{format(t.pay.planDeposit, { deposit: baht(deposit), later: baht(booking.totalSatang - deposit) })}</dd>
+          <dt>{t.pay.paidTotal}</dt>
+          <dd>{baht(booking.paidSatang)}</dd>
+          <dt>{t.pay.balance}</dt>
+          <dd>{booking.balanceSatang > 0 ? <strong className="adm-due">{baht(booking.balanceSatang)}</strong> : t.pay.paidInFull}</dd>
+        </dl>
       )}
 
       <h3 className="adm-h3">{t.pay.payments}</h3>
@@ -155,6 +170,9 @@ export function PaymentPanel({ booking, notice = null, onChanged }: {
                     {p.verifiedByName && <div className="adm-muted">{t.pay.by} {p.verifiedByName}</div>}
                   </td>
                   <td className="adm-small">
+                    {deposit !== null && (p.status === "PAID" || p.status === "VERIFIED" || p.status === "REFUNDED") && (
+                      <span className="adm-badge adm-badge--muted adm-deposit__kind">{p.id === firstPaid ? t.pay.kindDeposit : t.pay.kindBalance}</span>
+                    )}
                     {p.channel ? t.pay[`c${p.channel}`] : t.pay[`m${p.method}`]}
                     {p.reference && <div className="adm-muted">{t.pay.ref}: {p.reference}</div>}
                     {p.note && <div className="adm-muted">{p.note}</div>}
@@ -233,6 +251,7 @@ export function PaymentPanel({ booking, notice = null, onChanged }: {
       {awaiting && can("payments.verify") && (
         <form className="adm-subform" onSubmit={(e: FormEvent) => { e.preventDefault(); setConfirm("record"); }}>
           <h3 className="adm-h3">{t.pay.record}</h3>
+          {deposit !== null && <p className="adm-field__hint">{format(t.pay.recordDepositHint, { amount: baht(deposit) })}</p>}
           <div className="adm-grid2">
             <Field label={t.pay.amount} required inputMode="decimal" value={form.amount} error={errors.amountSatang}
               onChange={(e) => setForm({ ...form, amount: e.target.value })} />

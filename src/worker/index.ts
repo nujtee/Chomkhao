@@ -154,6 +154,8 @@ export function createApp(options: AppOptions = {}) {
     .post("/api/admin/bookings/:code/cancel", book.cancel)
     .get("/api/admin/bookings/:code/move-options", book.moveOptions)
     .post("/api/admin/bookings/:code/move", book.move)
+    .get("/api/admin/bookings/:code/balance", book.balance)
+    .post("/api/admin/bookings/:code/balance", book.payBalance)
     .get("/api/admin/pricing-rules", book.rules)
     .post("/api/admin/pricing-rules", book.createRule)
     .patch("/api/admin/pricing-rules/:id", book.updateRule)
