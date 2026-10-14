@@ -281,6 +281,8 @@ export function accommodationController(services: ServicesFor) {
       const v = new Validator(body).allowOnly([
         "isEnabled", "maxTentsPerNight", "pricePerAdultNightSatang", "childFreeUnderAge", "maxGuestsPerTent", "coverAssetId", "translations",
         "tarpEnabled", "tarpPricePerNightSatang", "maxTarpsPerNight", "paymentMode",
+        // Read-only (what GET returns): accepted so a page may send the settings back as read, and ignored.
+        "depositBookings",
       ]);
       const input = {
         isEnabled: v.boolean("isEnabled", false),

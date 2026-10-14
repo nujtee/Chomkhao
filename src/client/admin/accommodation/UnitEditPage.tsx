@@ -135,7 +135,8 @@ function BasicsForm({ type, unit, canEdit, onCreated, onSaved, onError }: {
           <Field label={t.acc.slug} required value={f.slug} onChange={set("slug")} hint={t.acc.slugHint} error={errors.slug} maxLength={80} />
           <Field label={t.acc.price} required inputMode="decimal" value={f.price} onChange={set("price")}
             disabled={!canPrice && !!unit} hint={!canPrice ? t.acc.needsPricing : undefined} error={errors.basePriceSatang} />
-          <PaymentModeField id="unit-payment-mode" value={f.paymentMode} error={errors.paymentMode} onChange={(paymentMode) => setF({ ...f, paymentMode })} />
+          <PaymentModeField id="unit-payment-mode" value={f.paymentMode} error={errors.paymentMode} deposits={unit?.depositBookings}
+            onChange={(paymentMode) => setF({ ...f, paymentMode })} />
           <div className="adm-field">
             <label htmlFor="unit-status">{t.acc.status}</label>
             <select id="unit-status" value={f.status} onChange={set("status")}>

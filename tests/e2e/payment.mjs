@@ -375,7 +375,23 @@ await check("deposit: the dashboard totals what is still due at check-in; the gu
   await pa.locator(".adm-table tbody tr").filter({ hasText: R.bookingCode }).getByText(`${baht(later)} due`).waitFor();
   assert((await pa.locator(".adm-table tbody tr").count()) === 1, "only bookings that still owe");
 
-  // Guest: the rest, by PromptPay QR (no PayPal here), then the slip.
+  // The owner switches House 02 back to full payment: told that this booking keeps its deposit plan.
+  await pa.goto(`${BASE}/en/admin/houses/dev_house_02`);
+  const mode = pa.getByLabel("Payment", { exact: true });
+  await mode.selectOption("FULL");
+  const kept = pa.locator(".adm-paymode-kept");
+  await kept.getByText("Bookings made with a deposit keep it — full payment applies to new bookings only").waitFor();
+  await kept.getByText(`Deposit paid, rest still due: 1 (in total ${baht(later)})`, { exact: false }).waitFor();
+  await pa.locator("form.adm-card").first().getByRole("button", { name: "Save" }).click();
+  await pa.getByText("Saved").first().waitFor();
+  await kept.waitFor(); // still shown once saved: the booking is still open
+  await pa.locator("form.adm-card").first().screenshot({ path: `${SHOTS}/balance-mode-switch.png` });
+  const unitNow = (await (await req.get(`${BASE}/api/admin/accommodations/dev_house_02`)).json()).data;
+  assert(unitNow.paymentMode === "FULL" && unitNow.depositBookings.paid === 1, JSON.stringify(unitNow.depositBookings));
+  await pa.goto(`${BASE}/en/admin/bookings/${R.bookingCode}`);
+  await pa.locator(".adm-deposit__kept").getByText("This stay now takes full payment", { exact: false }).waitFor();
+
+  // Guest: the rest, by PromptPay QR (no PayPal here), then the slip — the plan agreed at booking time still holds.
   await pg.goto(`${BASE}/th/booking/lookup?code=${R.bookingCode}`);
   await pg.locator("#lk-phone").fill("0866666666");
   await pg.locator("form button[type=submit]").click();
@@ -418,7 +434,10 @@ await check("deposit: the dashboard totals what is still due at check-in; the gu
   await pg.locator("form button[type=submit]").click();
   await pg.getByText("ชำระครบแล้ว — เช็กอินได้เลยโดยไม่ต้องชำระเพิ่ม").waitFor();
 
-  await req.patch(`${BASE}/api/admin/accommodations/dev_house_02`, { headers: H, data: { paymentMode: "FULL" } });
+  // Nothing open with a deposit any more: the note on House 02 goes away.
+  await pa.goto(`${BASE}/en/admin/houses/dev_house_02`);
+  await pa.getByLabel("Payment", { exact: true }).waitFor();
+  assert(!(await pa.locator(".adm-paymode-kept").count()), "note still shown with nothing open");
 });
 
 console.log("console errors:", consoleErrors.length, consoleErrors.slice(0, 5));

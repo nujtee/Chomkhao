@@ -214,6 +214,11 @@ export interface AdminBookingDto extends PublicBookingDto {
   payments: PaymentDto[];
   /** Check-in / check-out / no-show today (see shared/stay.ts). */
   stayActions: StayActionsDto;
+  /**
+   * Booked with a deposit, but the house / camping now takes full payment: this booking keeps the deposit plan
+   * agreed at booking time (the rest is still taken at check-in).
+   */
+  depositPlanKept: boolean;
 }
 
 // ------------------------------------------------------------------ food catalogue for a stay

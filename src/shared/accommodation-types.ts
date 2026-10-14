@@ -41,6 +41,19 @@ export interface AmenityDto {
   names: Partial<Record<LocaleCode, string>>;
 }
 
+/**
+ * Open bookings made with a deposit (migration 0025). The deposit agreed at booking time never changes, so these
+ * keep their plan when the owner later switches the stay to full payment.
+ */
+export interface DepositBookingsDto {
+  /** Confirmed with the deposit paid; the rest is still due (taken at check-in, or transferred before). */
+  paid: number;
+  /** What those bookings still owe in total. */
+  dueSatang: number;
+  /** Booked with a deposit that is not paid yet (hold running, or the slip being checked). */
+  awaiting: number;
+}
+
 export interface AdminUnitDto {
   id: string;
   unitCode: string;
@@ -49,6 +62,8 @@ export interface AdminUnitDto {
   basePriceSatang: number;
   /** FULL, or DEPOSIT_50 = guests pay half of the stay online and the rest before check-in. */
   paymentMode: PaymentMode;
+  /** Open deposit bookings of this house / VIP tent (single-unit reads only). */
+  depositBookings?: DepositBookingsDto;
   standardGuests: number;
   maxGuests: number;
   maxAdults: number | null;
@@ -165,6 +180,8 @@ export interface CampingSettingsDto {
   maxTarpsPerNight: number;
   /** FULL, or DEPOSIT_50 = guests pay half of the stay online and the rest before check-in. */
   paymentMode: PaymentMode;
+  /** Open deposit bookings of the camping ground (admin reads). */
+  depositBookings?: DepositBookingsDto;
   translations: Partial<Record<LocaleCode, { name: string; description: string | null; seoTitle: string | null; seoDescription: string | null }>>;
 }
 

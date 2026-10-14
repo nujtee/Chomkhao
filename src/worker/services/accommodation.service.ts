@@ -15,6 +15,7 @@ import { DEFAULT_TIMEZONE, todayIn } from "../../shared/dates.ts";
 import { DEFAULT_LOCALE_CODE, parseLocale, type Locale, type LocaleCode } from "../../shared/i18n/locales.ts";
 import type { D1DatabaseLike, D1PreparedStatementLike, R2BucketLike } from "../env.ts";
 import { ConflictError, NotFoundError, ValidationError } from "../http/errors.ts";
+import { openDepositBookings } from "../repositories/deposit-bookings.ts";
 import type { AccommodationRepository, UnitImageRow, UnitRow, UnitTranslationRow } from "../repositories/accommodation.repository.ts";
 import type { InventoryRepository } from "../repositories/inventory.repository.ts";
 import type { MediaRepository } from "../repositories/media.repository.ts";
@@ -164,7 +165,9 @@ export class AccommodationService {
   private async getAdmin(id: string): Promise<AdminUnitDto> {
     const unit = await this.repo.findUnit(id);
     if (!unit || unit.status === "DELETED") throw new NotFoundError("Accommodation not found", "ACCOMMODATION_NOT_FOUND");
-    return (await this.toAdmin([unit]))[0]!;
+    const [dto] = await this.toAdmin([unit]);
+    // Open deposit bookings keep their plan whatever this unit takes today: the owner sees how many there are.
+    return { ...dto!, depositBookings: await openDepositBookings(this.db, id, this.now()) };
   }
 
   private async toAdmin(units: UnitRow[]): Promise<AdminUnitDto[]> {
@@ -254,7 +257,11 @@ export class AccommodationService {
 
     const statements: D1PreparedStatementLike[] = [
       this.repo.updateUnitStatement(id, { ...next, now: this.now() }),
-      this.log.auditStatement(actor.userId, "UPDATE", MODULE, id, pickUnitFields(current), next, meta),
+      this.log.auditStatement(actor.userId, "UPDATE", MODULE, id, pickUnitFields(current), {
+        ...next,
+        // Deposit ↔ full payment: open deposit bookings keep the plan agreed at booking time (deposit frozen).
+        ...(next.paymentMode !== current.paymentMode ? { keptDepositBookings: current.depositBookings } : {}),
+      }, meta),
     ];
     if (priceChanged) statements.push(this.priceHistory(id, current.basePriceSatang, next.basePriceSatang, actor.userId));
     await this.commit(statements);

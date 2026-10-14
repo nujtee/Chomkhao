@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import type { AdminUnitDto, CampingSettingsDto } from "../../src/shared/accommodation-types.ts";
 import type { AdminBookingDto, AdminBookingSummaryDto, PublicBookingDto, QuoteDto } from "../../src/shared/booking-types.ts";
 import type { DashboardDto } from "../../src/shared/dashboard-types.ts";
 import type { BalanceDueDto, SlipQueueDto, SlipQueueItemDto, SlipUploadResultDto } from "../../src/shared/payment-types.ts";
@@ -205,6 +206,69 @@ describe("deposit plan: the guest transfers the rest before the stay", () => {
     await h.api("POST", `/api/admin/bookings/${full.bookingCode}/payments`, { token: admin, body: { amountSatang: full.totalSatang, method: "CASH", paidAt: "2027-01-10T02:00:00Z" } });
     assert.equal((await lookup(full.bookingCode)).balancePayment, null);
     assert.equal((await upload(full.bookingCode, 7)).error?.code, "SLIP_NOT_ACCEPTED");
+  });
+});
+
+describe("switching a stay from deposit to full payment: bookings made with a deposit keep it", () => {
+  it("the owner is told which bookings keep the deposit; check-in still takes the rest; new bookings pay in full", async () => {
+    const { h, admin, book, confirmed, lookup, upload, get } = await setup();
+    const paid = await confirmed(); // deposit paid, ฿3,500 still due
+    const waiting = await book("2027-02-01", "2027-02-03"); // deposit not paid yet
+    const before = await h.api<AdminUnitDto>("GET", "/api/admin/accommodations/dev_house_01", { token: admin });
+    assert.deepEqual(before.data.depositBookings, { paid: 1, dueSatang: LATER, awaiting: 1 });
+
+    // The owner switches House 01 to full payment.
+    const switched = await h.api<AdminUnitDto>("PATCH", "/api/admin/accommodations/dev_house_01", { token: admin, body: { paymentMode: "FULL" } });
+    assert.equal(switched.status, 200, JSON.stringify(switched.body));
+    assert.equal(switched.data.paymentMode, "FULL");
+    assert.deepEqual(switched.data.depositBookings, { paid: 1, dueSatang: LATER, awaiting: 1 }, "they are still open, with their deposit");
+    const audit = h.audits("UPDATE").find((a) => a.record_id === "dev_house_01" && a.new_value?.includes("keptDepositBookings"));
+    assert.ok(audit, "the audit log records the bookings that kept their deposit");
+
+    // The paid booking keeps its plan: staff see why, check-in still asks for the rest, the guest can still send it.
+    const row = await get(paid.bookingCode);
+    assert.deepEqual([row.depositSatang, row.balanceSatang, row.depositPlanKept], [paid.depositSatang, LATER, true]);
+    // The booking still waiting is asked for the deposit it was given (not the full amount).
+    assert.equal((await lookup(waiting.bookingCode)).paymentInstructions?.amountDueSatang, waiting.depositSatang);
+
+    h.advance(10 * 24 * 60 * 60_000); // 2027-01-20, the arrival day (the unpaid hold has long expired)
+    const desk = await h.login(await h.user({ id: `root_${++seq}`, roles: ["SUPER_ADMIN"] }));
+    assert.equal((await h.api("POST", `/api/admin/bookings/${paid.bookingCode}/stay/check-in`, { token: desk })).error?.code, "BALANCE_DUE");
+    const due = await h.api<BalanceDueDto>("GET", `/api/admin/bookings/${paid.bookingCode}/balance`, { token: desk });
+    assert.equal(due.data.balanceSatang, LATER);
+    assert.equal((await lookup(paid.bookingCode)).balancePayment?.instructions?.amountDueSatang, LATER);
+    const inn = await h.api<AdminBookingDto>("POST", `/api/admin/bookings/${paid.bookingCode}/balance`, { token: desk, body: { method: "CASH", checkIn: true } });
+    assert.equal(inn.status, 200, JSON.stringify(inn.body));
+    assert.deepEqual([inn.data.status, inn.data.paidSatang, inn.data.balanceSatang], ["CHECKED_IN", paid.totalSatang, 0]);
+
+    // A new booking pays in full and is not marked.
+    const fresh = await book("2027-03-01", "2027-03-03");
+    assert.equal(fresh.depositSatang, null);
+    assert.equal(fresh.paymentInstructions?.amountDueSatang, fresh.totalSatang);
+    assert.equal((await h.api<AdminBookingDto>("GET", `/api/admin/bookings/${fresh.bookingCode}`, { token: desk })).data.depositPlanKept, false);
+    // No upload for the checked-in booking.
+    assert.equal((await upload(paid.bookingCode, 9)).error?.code, "SLIP_NOT_ACCEPTED");
+  });
+
+  it("camping: the same check for tent bookings", async () => {
+    const { h, admin } = await setup();
+    const current = (await h.api<CampingSettingsDto>("GET", "/api/admin/camping", { token: admin })).data;
+    assert.deepEqual(current.depositBookings, { paid: 0, dueSatang: 0, awaiting: 0 });
+    await h.api("PUT", "/api/admin/camping", { token: admin, body: { ...current, paymentMode: "DEPOSIT_50" } });
+    const body = { checkIn: "2027-01-20", checkOut: "2027-01-22", adults: 2, children: 0, stay: { kind: "CAMPING", tents: 1 }, food: [], lang: "th" };
+    const q = await h.api<QuoteDto>("POST", "/api/public/bookings/quote", { body });
+    const b = (await h.api<PublicBookingDto>("POST", "/api/public/bookings", {
+      body: { ...body, customer: { name: "Tent Guest", phone: PHONE }, privacyAccepted: true, expectedTotalSatang: q.data.totalSatang, idempotencyKey: key() },
+    })).data;
+    assert.ok(b.depositSatang);
+    await h.api("POST", `/api/admin/bookings/${b.bookingCode}/payments`, { token: admin, body: { amountSatang: b.depositSatang, method: "CASH", paidAt: "2027-01-10T02:00:00Z" } });
+    const saved = await h.api<CampingSettingsDto>("PUT", "/api/admin/camping", { token: admin, body: { ...current, paymentMode: "FULL" } });
+    assert.equal(saved.status, 200, JSON.stringify(saved.body));
+    assert.deepEqual(saved.data.depositBookings, { paid: 1, dueSatang: b.totalSatang - b.depositSatang!, awaiting: 0 });
+    const row = (await h.api<AdminBookingDto>("GET", `/api/admin/bookings/${b.bookingCode}`, { token: admin })).data;
+    assert.deepEqual([row.depositPlanKept, row.balanceSatang], [true, b.totalSatang - b.depositSatang!]);
+    // House 01 (still deposit) is not affected by the camping switch.
+    assert.deepEqual((await h.api<AdminUnitDto>("GET", "/api/admin/accommodations/dev_house_01", { token: admin })).data.depositBookings, { paid: 0, dueSatang: 0, awaiting: 0 });
   });
 });
 

@@ -117,7 +117,8 @@ function SettingsForm({ settings, canEdit, onSaved, onError }: {
             onChange={(e) => setF({ ...f, childFreeUnderAge: e.target.value })} />
           <Field label={t.acc.maxGuestsPerTent} type="number" min={1} max={50} value={f.maxGuestsPerTent}
             onChange={(e) => setF({ ...f, maxGuestsPerTent: e.target.value })} />
-          <PaymentModeField id="camping-payment-mode" value={f.paymentMode} error={errors.paymentMode} onChange={(paymentMode) => setF({ ...f, paymentMode })} />
+          <PaymentModeField id="camping-payment-mode" value={f.paymentMode} error={errors.paymentMode} deposits={settings.depositBookings}
+            onChange={(paymentMode) => setF({ ...f, paymentMode })} />
         </div>
         <fieldset className="adm-subform adm-tarp">
           <legend className="adm-h3">{t.acc.tarpTitle}</legend>

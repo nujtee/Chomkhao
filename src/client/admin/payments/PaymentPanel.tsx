@@ -148,7 +148,11 @@ export function PaymentPanel({ booking, notice = null, onChanged }: {
       {deposit !== null && (
         <dl className="adm-dl adm-deposit">
           <dt>{t.pay.plan}</dt>
-          <dd>{format(t.pay.planDeposit, { deposit: baht(deposit), later: baht(booking.totalSatang - deposit) })}</dd>
+          <dd>
+            {format(t.pay.planDeposit, { deposit: baht(deposit), later: baht(booking.totalSatang - deposit) })}
+            {/* The stay was switched to full payment after this booking was made: the booking keeps its deposit plan. */}
+            {booking.depositPlanKept && <div className="adm-small adm-muted adm-deposit__kept">{t.pay.planKept}</div>}
+          </dd>
           <dt>{t.pay.paidTotal}</dt>
           <dd>{baht(booking.paidSatang)}</dd>
           <dt>{t.pay.balance}</dt>

@@ -11,6 +11,7 @@ import type {
 import { BOOKING_CODE_PATTERN, maskPhone, normalizePhone, type BookingMoveOptionsDto, type MoveDayState } from "../../shared/booking-types.ts";
 import type { BookingSettingsDto, StayAction } from "../../shared/dashboard-types.ts";
 import type { BalanceDueDto, BalanceMethod, PaymentInstructionsDto } from "../../shared/payment-types.ts";
+import { currentPaymentMode } from "../repositories/deposit-bookings.ts";
 import { balanceDue } from "../../shared/booking-rules.ts";
 import { dueOnline, paidOf } from "./booking-money.ts";
 import { addDays, diffDays, stayNights, todayIn } from "../../shared/dates.ts";
@@ -808,9 +809,14 @@ export class BookingService {
   }
 
   private async toAdmin(row: BookingRow): Promise<AdminBookingDto> {
-    const [snapshot, payments] = await Promise.all([this.payments.snapshot(row.id), this.payments.payments(row.id)]);
+    const [snapshot, payments, modeToday] = await Promise.all([
+      this.payments.snapshot(row.id), this.payments.payments(row.id),
+      row.deposit_satang !== null ? currentPaymentMode(this.db, row.id) : Promise.resolve(null),
+    ]);
     return {
       ...(await this.toPublic(row)),
+      // The deposit was fixed at booking time: a later switch of the stay to full payment does not change this booking.
+      depositPlanKept: modeToday === "FULL",
       paymentAccount: snapshot ? {
         receivingAccountId: snapshot.receiving_account_id,
         bankName: snapshot.bank_name_snapshot,

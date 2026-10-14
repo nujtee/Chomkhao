@@ -13,6 +13,7 @@ import { DEFAULT_LOCALE_CODE, type LocaleCode } from "../../shared/i18n/locales.
 import type { D1DatabaseLike, D1PreparedStatementLike } from "../env.ts";
 import { ConflictError, HttpError, NotFoundError, ValidationError } from "../http/errors.ts";
 import type { AccommodationRepository } from "../repositories/accommodation.repository.ts";
+import { openDepositBookings } from "../repositories/deposit-bookings.ts";
 import type { InventoryRepository } from "../repositories/inventory.repository.ts";
 import type { MediaRepository } from "../repositories/media.repository.ts";
 import type { PricingRepository } from "../repositories/pricing.repository.ts";
@@ -289,7 +290,12 @@ export class AvailabilityService {
 
   async getCampingSettings(actor: AuthContext, meta: RequestMeta): Promise<CampingSettingsDto> {
     await this.authz.requirePermission(actor, "camping.view", meta);
-    return this.readCampingSettings();
+    return this.withDepositBookings(await this.readCampingSettings());
+  }
+
+  /** Admin view: the open deposit bookings, which keep their plan whatever the camping takes today. */
+  private async withDepositBookings(settings: CampingSettingsDto): Promise<CampingSettingsDto> {
+    return { ...settings, depositBookings: await openDepositBookings(this.db, null, iso(this.clock())) };
   }
 
   private async readCampingSettings(): Promise<CampingSettingsDto> {
@@ -350,7 +356,11 @@ export class AvailabilityService {
       ...Object.entries(input.translations ?? {}).flatMap(([lang, t]) => (t ? [this.inventory.upsertCampingTranslationStatement(lang, t)] : [])),
       this.inventory.applyDefaultCapacityStatement(input.maxTentsPerNight, await this.today()),
       this.inventory.applyDefaultTarpCapacityStatement(input.maxTarpsPerNight, await this.today(), now),
-      this.log.auditStatement(actor.userId, "UPDATE_SETTINGS", "camping", "camping", omitTranslations(current), omitTranslations(input), meta),
+      this.log.auditStatement(actor.userId, "UPDATE_SETTINGS", "camping", "camping", omitTranslations(current), {
+        ...omitTranslations(input),
+        // Deposit → full payment: how many open deposit bookings keep their deposit plan (frozen at booking time).
+        ...(input.paymentMode !== current.paymentMode ? { keptDepositBookings: await openDepositBookings(this.db, null, now) } : {}),
+      }, meta),
     ];
     if (input.pricePerAdultNightSatang !== current.pricePerAdultNightSatang) {
       statements.push(this.db
@@ -372,7 +382,7 @@ export class AvailabilityService {
       }
       throw error;
     }
-    return this.readCampingSettings();
+    return this.withDepositBookings(await this.readCampingSettings());
   }
 
   /** Override one night's capacity (maxTents) or return it to the default (null). */
