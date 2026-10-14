@@ -1,5 +1,5 @@
 /**
- * Zoho Mail — notifications go out from the shop's own Zoho mailbox (e.g. booking@phasakura.com) through the
+ * Zoho Mail — notifications go out from the shop's own Zoho mailbox (e.g. booking@chomkhao.com) through the
  * Zoho Mail REST API, so the domain's existing Zoho SPF / DKIM records cover them.
  *
  *   refresh token ─► access token (1 h, cached per isolate)

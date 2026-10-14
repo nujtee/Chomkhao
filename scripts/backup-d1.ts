@@ -15,7 +15,7 @@ import { chmodSync, mkdirSync, readFileSync, statSync, writeFileSync } from "nod
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 
-/** backups/phasakura-db-20270110T030000Z.sql */
+/** backups/chomkhao-db-20270110T030000Z.sql */
 export function backupFileName(database: string, at: Date): string {
   if (!/^[a-z0-9][a-z0-9-]{0,62}$/i.test(database)) throw new Error(`invalid database name: ${database}`);
   return `${database}-${at.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z")}.sql`;
@@ -27,7 +27,7 @@ function wrangler(args: string[]): string {
 
 function main(): void {
   const ROOT = join(import.meta.dirname, "..");
-  const { values } = parseArgs({ options: { database: { type: "string", default: "phasakura-db" } } });
+  const { values } = parseArgs({ options: { database: { type: "string", default: "chomkhao-db" } } });
   const database = values.database!;
   const dir = join(ROOT, "backups");
   mkdirSync(dir, { recursive: true, mode: 0o700 });

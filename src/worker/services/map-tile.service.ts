@@ -57,7 +57,7 @@ export class MapTileService {
     try {
       const upstream = await fetchImpl(`${UPSTREAM}/${z}/${x}/${y}.png`, {
         headers: {
-          "User-Agent": `Phasakura/1.0 (+${this.options.siteUrl})`,
+          "User-Agent": `Chomkhao/1.0 (+${this.options.siteUrl})`,
           Referer: `${this.options.siteUrl}/`,
           Accept: "image/png",
         },

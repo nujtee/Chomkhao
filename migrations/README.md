@@ -48,8 +48,8 @@ npm run db:migrate:remote    # production — take a backup first (below)
   then back up and prepare a rollback:
 
   ```bash
-  npx wrangler d1 export phasakura-db --remote --output backup-$(date +%Y%m%d-%H%M).sql
+  npx wrangler d1 export chomkhao-db --remote --output backup-$(date +%Y%m%d-%H%M).sql
   # D1 Time Travel can also restore to a point in time:
-  npx wrangler d1 time-travel info phasakura-db
+  npx wrangler d1 time-travel info chomkhao-db
   ```
 - `seeds/dev.sql` is never applied remotely.

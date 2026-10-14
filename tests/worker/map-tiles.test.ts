@@ -73,7 +73,7 @@ describe("GET /map-tiles/… (OpenStreetMap through the Worker)", () => {
     assert.equal(h.tileRequests.length, 1);
     const call = h.tileRequests[0]!;
     assert.equal(call.url, "https://tile.openstreetmap.org/15/25350/14659.png");
-    assert.match(call.headers["user-agent"] ?? "", /^Phasakura\/1\.0 \(\+https?:\/\/[^)]+\)$/);
+    assert.match(call.headers["user-agent"] ?? "", /^Chomkhao\/1\.0 \(\+https?:\/\/[^)]+\)$/);
     assert.ok(call.headers.referer, "Referer sent");
     assert.ok(!("cookie" in call.headers), "no visitor data upstream");
   });

@@ -259,7 +259,7 @@ describe("report permissions, validation and exports", () => {
     const res = await get("/api/admin/reports/revenue/export?from=2027-01-01&to=2027-01-31&group=day&lang=th", exporter);
     assert.equal(res.status, 200);
     assert.equal(res.headers.get("Content-Type"), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-    assert.equal(res.headers.get("Content-Disposition"), 'attachment; filename="phasakura-revenue-2027-01-01_2027-01-31.xlsx"');
+    assert.equal(res.headers.get("Content-Disposition"), 'attachment; filename="chomkhao-revenue-2027-01-01_2027-01-31.xlsx"');
     assert.equal(res.headers.get("Cache-Control"), "no-store");
     const files = unzip(new Uint8Array(await res.arrayBuffer()));
     const sheet = files.get("xl/worksheets/sheet1.xml")!;

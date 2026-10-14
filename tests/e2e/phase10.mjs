@@ -63,7 +63,7 @@ await check("revenue report (monthly) with totals and chart", async () => {
 await check("Excel download is a valid workbook", async () => {
   const [download] = await Promise.all([pa.waitForEvent("download"), pa.getByRole("link", { name: "Download Excel" }).click()]);
   const name = download.suggestedFilename();
-  if (!/^phasakura-revenue-\d{4}-\d{2}-\d{2}_\d{4}-\d{2}-\d{2}\.xlsx$/.test(name)) throw new Error(name);
+  if (!/^chomkhao-revenue-\d{4}-\d{2}-\d{2}_\d{4}-\d{2}-\d{2}\.xlsx$/.test(name)) throw new Error(name);
   await download.saveAs(`${SHOTS}/browser-revenue.xlsx`);
 });
 

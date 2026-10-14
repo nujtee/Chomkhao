@@ -1,10 +1,11 @@
 // Cloudflare Worker configuration.
 // - No secrets in this file. Secrets go to `wrangler secret put <NAME>` (production)
 //   or `.dev.vars` (local, gitignored). See `.dev.vars.example`.
-// - D1 database_id is not a secret (phasakura-db, location hint APAC, created 2026-10-07).
+// - D1 database_id is not a secret (chomkhao-db, location hint APAC, created 2026-10-14).
+// - Chomkhao is a copy of the Phasakura code (same migrations); its own Worker, D1, R2 and secrets.
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "phasakura",
+  "name": "chomkhao",
   "main": "src/worker/index.ts",
   "compatibility_date": "2026-06-01",
   // Workers Logs (Phase 16): every request and every console.error is kept (3 days Free / 7 days Paid).
@@ -14,12 +15,12 @@
     "head_sampling_rate": 1
   },
 
-  // Production domain (Phase 16): phasakura.com (Cloudflare Registrar, zone on Cloudflare).
+  // Production domain: chomkhao.com (zone on Cloudflare).
   // Custom Domains create the DNS records and TLS certificates automatically. APP_BASE_URL is the apex;
-  // www.phasakura.com reaches the same Worker and is redirected (301) to it (src/worker/http/canonical-host.ts).
+  // www.chomkhao.com reaches the same Worker and is redirected (301) to it (src/worker/http/canonical-host.ts).
   "routes": [
-    { "pattern": "phasakura.com", "custom_domain": true },
-    { "pattern": "www.phasakura.com", "custom_domain": true }
+    { "pattern": "chomkhao.com", "custom_domain": true },
+    { "pattern": "www.chomkhao.com", "custom_domain": true }
   ],
   // Keep *.workers.dev off in production (duplicate site, skips the zone's security settings).
   "workers_dev": false,
@@ -50,7 +51,7 @@
   "vars": {
     "APP_ENV": "production",
     // Canonical https origin: canonical / hreflang / sitemap URLs, password reset / invite links, LINE messages.
-    "APP_BASE_URL": "https://phasakura.com",
+    "APP_BASE_URL": "https://chomkhao.com",
     "PUBLIC_MEDIA_BASE_URL": "",
     // Slip verification service ("easyslip"; empty = EasySlip once its key exists). The API key is a secret:
     // `wrangler secret put SLIP_VERIFICATION_API_KEY` — never here. No key = staff verify every slip.
@@ -70,8 +71,8 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "phasakura-db",
-      "database_id": "8f013af9-6464-4ed2-8aa1-f426fbb707b8",
+      "database_name": "chomkhao-db",
+      "database_id": "227e945a-ca93-4749-a92a-08c959bb3485",
       "migrations_dir": "migrations"
     }
   ],
@@ -82,20 +83,20 @@
   "r2_buckets": [
     {
       "binding": "MEDIA_PUBLIC",
-      "bucket_name": "phasakura-media-public"
+      "bucket_name": "chomkhao-media-public"
     },
     {
       "binding": "MEDIA_PRIVATE",
-      "bucket_name": "phasakura-media-private"
+      "bucket_name": "chomkhao-media-private"
     }
   ],
 
   // Per-IP request limits (Phase 14, spec §58) — Workers Rate Limiting, counted at the edge (no D1 writes).
-  // namespace_id must be unique per account; period is 10 or 60 seconds.
+  // namespace_id must be unique per account (Phasakura uses 1001–1004 in the same account); period is 10 or 60 seconds.
   "ratelimits": [
-    { "name": "RL_PUBLIC", "namespace_id": "1001", "simple": { "limit": 300, "period": 60 } },
-    { "name": "RL_WRITE", "namespace_id": "1002", "simple": { "limit": 30, "period": 60 } },
-    { "name": "RL_AUTH", "namespace_id": "1003", "simple": { "limit": 10, "period": 60 } },
-    { "name": "RL_ADMIN", "namespace_id": "1004", "simple": { "limit": 600, "period": 60 } }
+    { "name": "RL_PUBLIC", "namespace_id": "2001", "simple": { "limit": 300, "period": 60 } },
+    { "name": "RL_WRITE", "namespace_id": "2002", "simple": { "limit": 30, "period": 60 } },
+    { "name": "RL_AUTH", "namespace_id": "2003", "simple": { "limit": 10, "period": 60 } },
+    { "name": "RL_ADMIN", "namespace_id": "2004", "simple": { "limit": 600, "period": 60 } }
   ]
 }

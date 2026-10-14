@@ -14,7 +14,7 @@ const ROOT = join(import.meta.dirname, "..", "..");
 const WRANGLER = readFileSync(join(ROOT, "wrangler.jsonc"), "utf8");
 const MIGRATIONS = Object.fromEntries(readdirSync(join(ROOT, "migrations")).filter((f) => f.endsWith(".sql")).map((f) => [f, readFileSync(join(ROOT, "migrations", f), "utf8")]));
 
-/** The repository config: production values for phasakura.com. */
+/** The repository config: production values for chomkhao.com. */
 const READY = WRANGLER;
 /** The same config before the owner filled in the domain, the D1 id and the base URL (a fresh fork). */
 const BLANK = WRANGLER
@@ -47,7 +47,7 @@ describe("preflight (npm run preflight)", () => {
     assert.ok(found.some((e) => e.startsWith("domain: no routes")));
   });
 
-  it("the repository config (phasakura.com) passes; only manual slip checking remains a warning", () => {
+  it("the repository config (chomkhao.com) passes; only manual slip checking remains a warning", () => {
     const f = run();
     assert.deepEqual(errors(f), []);
     assert.deepEqual(warns(f).map((w) => w.split(":")[0]), ["payments"]);
@@ -56,14 +56,14 @@ describe("preflight (npm run preflight)", () => {
   it("catches risky configuration", () => {
     const cases: [string, string, RegExp][] = [
       ['"APP_ENV": "production"', '"APP_ENV": "staging"', /APP_ENV/],
-      ['"APP_BASE_URL": "https://phasakura.com"', '"APP_BASE_URL": "https://phasakura.com/"', /no trailing slash/],
-      ['"APP_BASE_URL": "https://phasakura.com"', '"APP_BASE_URL": "http://phasakura.com"', /https/],
+      ['"APP_BASE_URL": "https://chomkhao.com"', '"APP_BASE_URL": "https://chomkhao.com/"', /no trailing slash/],
+      ['"APP_BASE_URL": "https://chomkhao.com"', '"APP_BASE_URL": "http://chomkhao.com"', /https/],
       ['"SLIP_VERIFY_PROVIDER": ""', '"SLIP_VERIFY_PROVIDER": "ocr"', /not supported/],
       ['"META_GRAPH_API_VERSION": "v23.0"', '"META_GRAPH_API_VERSION": "v23.0", "LINE_CHANNEL_SECRET": "abc"', /LINE_CHANNEL_SECRET is in vars/],
-      ['"namespace_id": "1002"', '"namespace_id": "1001"', /unique/],
+      ['"namespace_id": "2002"', '"namespace_id": "2001"', /unique/],
       ['"period": 60 } },\n    { "name": "RL_WRITE"', '"period": 30 } },\n    { "name": "RL_WRITE"', /period/],
       ['"crons": ["* * * * *"]', '"crons": ["*/5 * * * *"]', /crons/],
-      ['"bucket_name": "phasakura-media-private"', '"bucket_name": "phasakura-media-public"', /different buckets/],
+      ['"bucket_name": "chomkhao-media-private"', '"bucket_name": "chomkhao-media-public"', /different buckets/],
       ['"run_worker_first": ["/*", "!/assets/*"]', '"run_worker_first": ["/api/*"]', /run_worker_first/],
       ['"compatibility_date": "2026-06-01"', '"compatibility_date": "2027-01-01"', /future/],
     ];
@@ -76,7 +76,7 @@ describe("preflight (npm run preflight)", () => {
     assert.ok(warns(run({ wrangler: READY.replace('"workers_dev": false,', '"workers_dev": true,') })).some((w) => /workers\.dev/.test(w)));
     assert.ok(warns(run({ wrangler: READY.replace('"preview_urls": false,', "") })).some((w) => /preview/.test(w)));
     assert.ok(warns(run({ wrangler: READY.replace('"head_sampling_rate": 1', '"head_sampling_rate": 0.1') })).some((w) => /dropped/.test(w)));
-    assert.ok(warns(run({ wrangler: READY.replace('    { "pattern": "phasakura.com", "custom_domain": true },\n', "") })).some((w) => /not one of the routes/.test(w)));
+    assert.ok(warns(run({ wrangler: READY.replace('    { "pattern": "chomkhao.com", "custom_domain": true },\n', "") })).some((w) => /not one of the routes/.test(w)));
   });
 
   it("migrations: numbering, LATEST_MIGRATION in sync, no virtual tables (D1 export)", () => {
@@ -113,7 +113,7 @@ describe("preflight (npm run preflight)", () => {
 
 describe("backup file names (npm run db:backup)", () => {
   it("UTC timestamp, safe database names only", () => {
-    assert.equal(backupFileName("phasakura-db", new Date("2027-01-10T03:04:05.678Z")), "phasakura-db-20270110T030405Z.sql");
+    assert.equal(backupFileName("chomkhao-db", new Date("2027-01-10T03:04:05.678Z")), "chomkhao-db-20270110T030405Z.sql");
     assert.throws(() => backupFileName("../x", new Date()), /invalid database name/);
     assert.throws(() => backupFileName("db; rm -rf /", new Date()), /invalid database name/);
   });

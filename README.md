@@ -1,4 +1,7 @@
-# Phasakura — Accommodation Booking Website
+# Chomkhao — Accommodation Booking Website
+
+> Copy of the Phasakura code for chomkhao.com (own Worker, D1, R2 and secrets). Production status and how to pull
+> fixes from Phasakura: `docs/PRODUCTION.md`.
 
 React + TypeScript frontend and a Cloudflare Worker backend (D1 + R2), deployed as a single Worker.
 Full requirements and phase status: [`MASTER_SPEC.md`](./MASTER_SPEC.md).
@@ -11,9 +14,9 @@ cp .dev.vars.example .dev.vars          # local non-secret config, gitignored
 
 # one-time Cloudflare setup
 npx wrangler login
-npx wrangler d1 create phasakura-db     # copy database_id into wrangler.jsonc
-npx wrangler r2 bucket create phasakura-media-public
-npx wrangler r2 bucket create phasakura-media-private
+npx wrangler d1 create chomkhao-db     # copy database_id into wrangler.jsonc
+npx wrangler r2 bucket create chomkhao-media-public
+npx wrangler r2 bucket create chomkhao-media-private
 
 # run locally (two terminals)
 npm run dev:worker                      # Worker API on :8787 (local D1/R2)
@@ -26,7 +29,7 @@ No default admin or password ships with the app. Create the first SUPER_ADMIN on
 
 ```bash
 npm run admin:bootstrap -- --email you@example.com --name "Your Name" --out bootstrap.sql
-npx wrangler d1 execute phasakura-db --local --file bootstrap.sql    # or --remote
+npx wrangler d1 execute chomkhao-db --local --file bootstrap.sql    # or --remote
 rm bootstrap.sql
 ```
 
@@ -157,7 +160,7 @@ queued / failed deliveries and recent server errors; uptime monitors use `GET /a
 ## Push to GitHub
 
 ```bash
-git remote add origin git@github.com:<you>/phasakura.git
+git remote add origin git@github.com:<you>/chomkhao.git
 git push -u origin main
 ```
 

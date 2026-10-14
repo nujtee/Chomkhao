@@ -1,5 +1,5 @@
 {
-  "name": "phasakura",
+  "name": "chomkhao",
   "private": true,
   "version": "0.1.0",
   "description": "Accommodation booking website and back-office on Cloudflare Workers, D1 and R2",
@@ -25,12 +25,12 @@
     "check": "npm run typecheck && npm run lint && npm run check:static && npm test",
     "cf-typegen": "wrangler types",
     "admin:bootstrap": "tsx scripts/create-super-admin.ts",
-    "db:migrate:local": "wrangler d1 migrations apply phasakura-db --local",
-    "db:migrate:remote": "wrangler d1 migrations apply phasakura-db --remote",
-    "db:migrations:list": "wrangler d1 migrations list phasakura-db --local",
-    "db:migrations:list:remote": "wrangler d1 migrations list phasakura-db --remote",
+    "db:migrate:local": "wrangler d1 migrations apply chomkhao-db --local",
+    "db:migrate:remote": "wrangler d1 migrations apply chomkhao-db --remote",
+    "db:migrations:list": "wrangler d1 migrations list chomkhao-db --local",
+    "db:migrations:list:remote": "wrangler d1 migrations list chomkhao-db --remote",
     "db:backup": "tsx scripts/backup-d1.ts",
-    "db:seed:local": "wrangler d1 execute phasakura-db --local --file seeds/dev.sql",
+    "db:seed:local": "wrangler d1 execute chomkhao-db --local --file seeds/dev.sql",
     "db:reset:local": "node -e \"require('fs').rmSync('.wrangler/state/v3/d1',{recursive:true,force:true})\" && npm run db:migrate:local && npm run db:seed:local"
   },
   "dependencies": {

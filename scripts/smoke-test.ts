@@ -52,7 +52,7 @@ export async function smoke(baseUrl: string, options: SmokeOptions = {}): Promis
   if (h) {
     let body: HealthDto | null = null;
     try { body = ((await h.json()) as { data: HealthDto }).data; } catch { /* not JSON */ }
-    if (!body) add("error", "health", `/api/health answered ${h.status} without JSON — is this the Phasakura Worker?`);
+    if (!body) add("error", "health", `/api/health answered ${h.status} without JSON — is this the Chomkhao Worker?`);
     else {
       add(body.database === "ok" ? "ok" : "error", "health", `database ${body.database}`);
       add(body.schema === "ok" ? "ok" : body.schema === "unknown" ? "warn" : "error", "health",

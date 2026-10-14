@@ -1,4 +1,4 @@
-# MASTER_SPEC — Phasakura Accommodation Booking Website
+# MASTER_SPEC — Chomkhao Accommodation Booking Website (same code as Phasakura)
 
 > เอกสารนี้คือ Source of Truth ของ Requirement ทั้งหมด
 > ส่วน **A** คือสถานะโปรเจกต์และการตัดสินใจทางเทคนิค (อัปเดตทุก Phase)

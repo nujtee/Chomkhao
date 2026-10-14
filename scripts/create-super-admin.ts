@@ -2,7 +2,7 @@
  * One-time bootstrap of the first SUPER_ADMIN (no default admin/password ships in migrations).
  *
  *   npm run admin:bootstrap -- --email owner@example.com --name "Owner" [--username owner] [--out bootstrap.sql]
- *   npx wrangler d1 execute phasakura-db --remote --file bootstrap.sql   # or --local
+ *   npx wrangler d1 execute chomkhao-db --remote --file bootstrap.sql   # or --local
  *   rm bootstrap.sql
  *
  * - A strong random password is generated and printed ONCE to this terminal (never written to the file).
@@ -77,7 +77,7 @@ async function main() {
   writeFileSync(values.out!, sql, { mode: 0o600 });
 
   console.log(`\nWrote ${values.out} (password hash only).`);
-  console.log(`Apply:  npx wrangler d1 execute phasakura-db --remote --file ${values.out}   (or --local)`);
+  console.log(`Apply:  npx wrangler d1 execute chomkhao-db --remote --file ${values.out}   (or --local)`);
   console.log(`Then delete ${values.out}.\n`);
   if (!chosen) {
     console.log("Temporary password (shown once — you must change it at first login):");

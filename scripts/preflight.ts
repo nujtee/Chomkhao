@@ -145,7 +145,7 @@ export function preflight(input: PreflightInput): Finding[] {
   if (!d1) add("error", "d1", "no D1 binding named DB");
   else {
     const id = str(d1.database_id);
-    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) add("error", "d1", `database_id "${id}" is a placeholder — run \`wrangler d1 create ${str(d1.database_name) || "phasakura-db"}\` and paste the id`);
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) add("error", "d1", `database_id "${id}" is a placeholder — run \`wrangler d1 create ${str(d1.database_name) || "chomkhao-db"}\` and paste the id`);
     else add("ok", "d1", `${str(d1.database_name)} (${id.slice(0, 8)}…)`);
     if (d1.migrations_dir !== "migrations") add("error", "d1", 'migrations_dir must be "migrations"');
   }
