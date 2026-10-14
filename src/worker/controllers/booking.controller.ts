@@ -1,5 +1,5 @@
-import type { BookingStatus, FoodSelection, PaymentStatus, PricingRuleInput, StaySelection } from "../../shared/booking-types.ts";
-import { BOOKING_CODE_PATTERN, IDEMPOTENCY_KEY_PATTERN } from "../../shared/booking-types.ts";
+import type { BookingStatus, FoodSelection, PaymentStatus, PricingRuleInput } from "../../shared/booking-types.ts";
+import { BOOKING_CODE_PATTERN, IDEMPOTENCY_KEY_PATTERN, MAX_STAYS_PER_BOOKING } from "../../shared/booking-types.ts";
 import { MAX_PRICE_SATANG } from "../../shared/booking-rules.ts";
 import { BALANCE_METHODS, type BalanceMethod } from "../../shared/payment-types.ts";
 import { isIsoDate } from "../../shared/dates.ts";
@@ -9,7 +9,7 @@ import { BadRequestError, ValidationError } from "../http/errors.ts";
 import { jsonOk } from "../http/response.ts";
 import type { Handler, RequestContext } from "../router.ts";
 import { readJsonObject } from "../security/request.ts";
-import { MAX_FOOD_LINES, MAX_GUESTS_PER_BOOKING, type QuoteInput } from "../services/quote.service.ts";
+import { MAX_FOOD_LINES, MAX_GUESTS_PER_BOOKING, type QuoteInput, type StayInput } from "../services/quote.service.ts";
 import { ID_PATTERN, Validator } from "../validation.ts";
 import { currentConsent, metaBrowserIds } from "../../shared/consent.ts";
 import type { Services } from "../container.ts";
@@ -52,25 +52,68 @@ function obj(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
 }
 
-const QUOTE_FIELDS = ["checkIn", "checkOut", "adults", "children", "stay", "food", "lang"] as const;
+const QUOTE_FIELDS = ["checkIn", "checkOut", "adults", "children", "stay", "stays", "food", "lang"] as const;
+
+/**
+ * One stay: a house / VIP tent, or own-tent camping. `withGuests`: an entry of `stays`, which carries its own
+ * adults / children; the legacy single `stay` does not (the booking's guests are its guests).
+ */
+function parseStay(raw: unknown, v: Validator, key: string, withGuests: boolean): StayInput | null {
+  const s = obj(raw);
+  const guestKeys = withGuests ? ["adults", "children"] : [];
+  if (!s) {
+    v.errors[key] = "REQUIRED";
+    return null;
+  }
+  const guests = () => ({
+    adults: withGuests ? int(v, s.adults, `${key}.adults`, 0, MAX_GUESTS_PER_BOOKING) : 0,
+    children: withGuests ? (s.children === undefined ? 0 : int(v, s.children, `${key}.children`, 0, MAX_GUESTS_PER_BOOKING)) : 0,
+  });
+  if (s.kind === "UNIT" && Object.keys(s).every((k) => ["kind", "unitId", ...guestKeys].includes(k))) {
+    if (typeof s.unitId !== "string" || !ID_PATTERN.test(s.unitId)) {
+      v.errors[`${key}.unitId`] = "INVALID_ID";
+      return null;
+    }
+    return { kind: "UNIT", unitId: s.unitId, ...guests() };
+  }
+  if (s.kind === "CAMPING" && Object.keys(s).every((k) => ["kind", "tents", "tarp", ...guestKeys].includes(k))) {
+    if (s.tarp !== undefined && typeof s.tarp !== "boolean") v.errors[`${key}.tarp`] = "INVALID_VALUE";
+    return { kind: "CAMPING", tents: int(v, s.tents, `${key}.tents`, 1, 100), tarp: s.tarp === true, ...guests() };
+  }
+  v.errors[key] = "INVALID_VALUE";
+  return null;
+}
 
 /** Parses the stay/guests/food part shared by quote and create. Strict: unknown fields are rejected. */
 function parseQuote(body: Record<string, unknown>, v: Validator): QuoteInput {
   const checkIn = date(v, body.checkIn, "checkIn");
   const checkOut = date(v, body.checkOut, "checkOut");
-  const adults = int(v, body.adults, "adults", 1, MAX_GUESTS_PER_BOOKING);
-  const children = body.children === undefined ? 0 : int(v, body.children, "children", 0, MAX_GUESTS_PER_BOOKING);
 
-  let stay: StaySelection = { kind: "UNIT", unitId: "" };
-  const s = obj(body.stay);
-  if (!s) v.errors.stay = "REQUIRED";
-  else if (s.kind === "UNIT" && Object.keys(s).every((k) => k === "kind" || k === "unitId")) {
-    if (typeof s.unitId !== "string" || !ID_PATTERN.test(s.unitId)) v.errors["stay.unitId"] = "INVALID_ID";
-    else stay = { kind: "UNIT", unitId: s.unitId };
-  } else if (s.kind === "CAMPING" && Object.keys(s).every((k) => k === "kind" || k === "tents" || k === "tarp")) {
-    if (s.tarp !== undefined && typeof s.tarp !== "boolean") v.errors["stay.tarp"] = "INVALID_VALUE";
-    stay = { kind: "CAMPING", tents: int(v, s.tents, "stay.tents", 1, 100), ...(s.tarp === true ? { tarp: true } : {}) };
-  } else v.errors.stay = "INVALID_VALUE";
+  // Several stays (each with its own guests), or one legacy `stay` with the booking's guests.
+  let stays: StayInput[] = [];
+  let adults = 1;
+  let children = 0;
+  const legacy = body.stays === undefined;
+  if (!legacy) {
+    if (body.stay !== undefined) v.errors.stay = "NOT_WITH_STAYS";
+    if (!Array.isArray(body.stays) || body.stays.length === 0) v.errors.stays = "REQUIRED";
+    else if (body.stays.length > MAX_STAYS_PER_BOOKING) v.errors.stays = "TOO_MANY";
+    else {
+      stays = body.stays.map((raw, i) => parseStay(raw, v, `stays.${i}`, true)).filter((x): x is StayInput => x !== null);
+      // The booking's guests are the stays' guests (a total sent alongside must agree).
+      adults = stays.reduce((acc, x) => acc + x.adults, 0);
+      children = stays.reduce((acc, x) => acc + x.children, 0);
+      if (body.adults !== undefined && body.adults !== adults) v.errors.adults = "NOT_SUM_OF_STAYS";
+      if (body.children !== undefined && body.children !== children) v.errors.children = "NOT_SUM_OF_STAYS";
+      if (adults < 1) v.errors.adults = "OUT_OF_RANGE";
+      if (adults + children > MAX_GUESTS_PER_BOOKING) v.errors.guests = "OUT_OF_RANGE";
+    }
+  } else {
+    adults = int(v, body.adults, "adults", 1, MAX_GUESTS_PER_BOOKING);
+    children = body.children === undefined ? 0 : int(v, body.children, "children", 0, MAX_GUESTS_PER_BOOKING);
+    const stay = parseStay(body.stay, v, "stay", false);
+    if (stay) stays = [{ ...stay, adults, children }];
+  }
 
   const food: FoodSelection[] = [];
   if (body.food !== undefined) {
@@ -96,7 +139,7 @@ function parseQuote(body: Record<string, unknown>, v: Validator): QuoteInput {
       });
     }
   }
-  return { checkIn, checkOut, adults, children, stay, food, lang: langOf(body.lang).code };
+  return { checkIn, checkOut, adults, children, stays, legacy, food, lang: langOf(body.lang).code };
 }
 
 function parseRule(body: Record<string, unknown>, partial: boolean): Partial<PricingRuleInput> {
@@ -247,6 +290,16 @@ export function bookingController(services: ServicesFor) {
       const reason = v.string("reason", { required: true, min: 3, max: 500 });
       v.assertValid();
       return jsonOk(await services(ctx).bookings.adminCancel(auth, codeParam(ctx), reason, requestMeta(ctx)), { headers: NO_STORE });
+    }),
+
+    /** One stay of a booking with several (the booking goes on). */
+    cancelStay: withPermission("bookings.cancel", services, async (ctx, auth) => {
+      const v = new Validator(await readJsonObject(ctx.request)).allowOnly(["reason"]);
+      const reason = v.string("reason", { required: true, min: 3, max: 500 });
+      const itemId = ctx.params.itemId ?? "";
+      if (!ID_PATTERN.test(itemId)) v.errors.itemId = "INVALID_ID";
+      v.assertValid();
+      return jsonOk(await services(ctx).bookings.cancelStay(auth, codeParam(ctx), itemId, reason, requestMeta(ctx)), { headers: NO_STORE });
     }),
 
     // ------------------------------------------------------------------ admin pricing rules

@@ -1,4 +1,5 @@
 import type { D1DatabaseLike, D1PreparedStatementLike } from "../env.ts";
+import { netPayment, PAID_SQL } from "./booking.repository.ts";
 
 export interface ReceivingAccountRow {
   id: string;
@@ -130,7 +131,7 @@ const SLIP_PAYMENT_SELECT = `
  * the rest can be taken once — at reception or from the guest's own transfer, never both.
  */
 const BALANCE_OPEN = `EXISTS (SELECT 1 FROM bookings b WHERE b.id = ?2 AND b.booking_status = 'CONFIRMED' AND b.deposit_satang IS NOT NULL
-    AND b.total_satang - (SELECT COALESCE(SUM(q.amount_satang), 0) FROM payments q WHERE q.booking_id = b.id AND q.status IN ('VERIFIED', 'PAID')) = ?3
+    AND b.total_satang - (SELECT COALESCE(SUM(${netPayment("q")}), 0) FROM payments q WHERE q.booking_id = b.id) = ?3
     AND NOT EXISTS (SELECT 1 FROM payments w WHERE w.booking_id = b.id AND w.status = 'PENDING_VERIFICATION'))`;
 
 const ACCOUNT_SELECT = `
@@ -323,12 +324,15 @@ export class PaymentRepository {
       .bind(p.id, p.bookingId, p.amount, p.method, p.reference, p.by, p.now);
   }
 
+  /** A booking still on (a stay was cancelled after payment) never has more refunded than was paid beyond its total. */
   refundStatement(paymentId: string, bookingId: string, amount: number, reason: string, by: string, now: string): D1PreparedStatementLike {
     return this.db
       .prepare(
         `UPDATE payments SET status = 'REFUNDED', refunded_at = ?6, refunded_by = ?5, refund_amount_satang = ?3,
            refund_reason = ?4, updated_at = ?6
           WHERE id = ?1 AND booking_id = ?2 AND status IN ('PAID', 'VERIFIED')
+            AND EXISTS (SELECT 1 FROM bookings b WHERE b.id = ?2
+                          AND (b.booking_status IN ('CANCELLED', 'NO_SHOW') OR ${PAID_SQL} - ?3 >= b.total_satang))
           RETURNING id`,
       )
       .bind(paymentId, bookingId, amount, reason, by, now);
@@ -339,7 +343,8 @@ export class PaymentRepository {
     return this.db
       .prepare(
         `UPDATE bookings SET payment_status = 'REFUNDED', updated_at = ?2
-          WHERE id = ?1 AND NOT EXISTS (SELECT 1 FROM payments WHERE booking_id = ?1 AND status IN ('PAID', 'VERIFIED'))`,
+          WHERE id = ?1 AND booking_status IN ('CANCELLED', 'NO_SHOW')
+            AND NOT EXISTS (SELECT 1 FROM payments WHERE booking_id = ?1 AND status IN ('PAID', 'VERIFIED'))`,
       )
       .bind(bookingId, now);
   }

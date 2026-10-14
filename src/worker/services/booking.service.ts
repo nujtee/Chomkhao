@@ -7,12 +7,14 @@ import type {
   PaymentStatus,
   PublicBookingDto,
   QuoteDto,
+  QuoteItemDto,
 } from "../../shared/booking-types.ts";
 import { BOOKING_CODE_PATTERN, maskPhone, normalizePhone, type BookingMoveOptionsDto, type MoveDayState } from "../../shared/booking-types.ts";
 import type { BookingSettingsDto, StayAction } from "../../shared/dashboard-types.ts";
 import type { BalanceDueDto, BalanceMethod, PaymentInstructionsDto } from "../../shared/payment-types.ts";
+import { parseStays } from "../repositories/stay-sql.ts";
 import { currentPaymentMode } from "../repositories/deposit-bookings.ts";
-import { balanceDue } from "../../shared/booking-rules.ts";
+import { depositFor, balanceDue } from "../../shared/booking-rules.ts";
 import { dueOnline, paidOf } from "./booking-money.ts";
 import { addDays, diffDays, stayNights, todayIn } from "../../shared/dates.ts";
 import { BookingMoveRepository, KITCHEN_STARTED } from "../repositories/booking-move.repository.ts";
@@ -153,7 +155,6 @@ export class BookingService {
   private createStatements(p: PreparedBooking, input: CreateBookingInput, phoneNormalized: string, code: string, bookingId: string, now: Date, meta: RequestMeta): D1PreparedStatementLike[] {
     const repo = this.repo;
     const at = iso(now);
-    const itemId = newId();
     const q = p.quote;
     const statements: D1PreparedStatementLike[] = [
       repo.insertBookingStatement({
@@ -181,54 +182,59 @@ export class BookingService {
         privacyAcceptedAt: at,
         now: at,
       }),
-      repo.insertItemStatement({
-        id: itemId, bookingId, type: q.item.type, unitId: q.item.unitId, quantity: q.item.quantity,
-        adults: q.adults, children: q.children, now: at,
-      }),
     ];
 
-    // Inventory: the database rejects the whole batch if a night or tent is gone.
-    if (p.unit) {
-      for (const night of p.nights) statements.push(repo.lockNightStatement(p.unit.id, night, bookingId, itemId, at));
-    } else {
-      for (const night of p.nights) {
-        statements.push(...repo.reserveTentsStatements(night, p.tents, at));
+    // One booking item per stay (houses / VIP tents / camping), in the order chosen.
+    const itemIds = p.stays.map(() => newId());
+    for (const [i, stay] of p.stays.entries()) {
+      const item = stay.item;
+      const itemId = itemIds[i]!;
+      statements.push(repo.insertItemStatement({
+        id: itemId, bookingId, type: item.type, unitId: item.unitId, quantity: item.quantity,
+        adults: item.adults, children: item.children, payLater: item.payLaterSatang, now: iso(addMs(now, i)),
+      }));
+
+      // Inventory: the database rejects the whole batch if a night or tent is gone.
+      if (stay.unit) {
+        for (const night of p.nights) statements.push(repo.lockNightStatement(stay.unit.id, night, bookingId, itemId, at));
+      } else {
+        for (const night of p.nights) statements.push(...repo.reserveTentsStatements(night, stay.tents, at));
+        // Tarp area: its own nightly limit (CHECK) and a price snapshot; triggers re-check camping + option offered.
+        if (stay.tarp) {
+          for (const night of p.nights) statements.push(...repo.reserveTarpStatements(night, stay.tarp.quantity, at));
+          statements.push(repo.insertTarpStatement({
+            id: newId(), bookingId, quantity: stay.tarp.quantity, pricePerNight: stay.tarp.pricePerNightSatang,
+            nights: stay.tarp.nights, subtotal: stay.tarp.subtotalSatang, now: at,
+          }));
+        }
       }
-      // Tarp area: its own nightly limit (CHECK) and a price snapshot; triggers re-check camping + option offered.
-      if (p.tarp) {
-        for (const night of p.nights) statements.push(...repo.reserveTarpStatements(night, p.tarp.quantity, at));
-        statements.push(repo.insertTarpStatement({
-          id: newId(), bookingId, quantity: p.tarp.quantity, pricePerNight: p.tarp.pricePerNightSatang,
-          nights: p.tarp.nights, subtotal: p.tarp.subtotalSatang, now: at,
+
+      // Immutable price snapshot (spec §17), one per stay.
+      statements.push(repo.insertPriceSnapshotStatement({
+        id: newId(),
+        bookingId,
+        itemId,
+        unitId: item.unitId,
+        name: item.name,
+        unitType: item.type,
+        price: item.nightly[0]?.priceSatang ?? 0,
+        pricingType: item.pricingType,
+        quantity: item.quantity,
+        nights: q.nights,
+        adults: item.adults,
+        children: item.children,
+        nightlyJson: JSON.stringify(item.nightly),
+        subtotal: item.subtotalSatang,
+        now: at,
+      }));
+
+      // Included meals snapshot (spec §20).
+      for (const m of stay.included) {
+        statements.push(repo.insertIncludedMealStatement({
+          id: newId(), bookingId, itemId, includedMealId: m.meal.id, categoryId: m.meal.food_category_id,
+          optionId: m.option?.id ?? null, name: m.dto.name, persons: m.dto.personsPerNight, nights: q.nights, now: at,
         }));
       }
-    }
-
-    // Immutable price snapshot (spec §17).
-    statements.push(repo.insertPriceSnapshotStatement({
-      id: newId(),
-      bookingId,
-      itemId,
-      unitId: q.item.unitId,
-      name: q.item.name,
-      unitType: q.item.type,
-      price: q.item.nightly[0]?.priceSatang ?? 0,
-      pricingType: q.item.pricingType,
-      quantity: q.item.quantity,
-      nights: q.nights,
-      adults: q.adults,
-      children: q.children,
-      nightlyJson: JSON.stringify(q.item.nightly),
-      subtotal: q.item.subtotalSatang,
-      now: at,
-    }));
-
-    // Included meals snapshot (spec §20).
-    for (const m of p.included) {
-      statements.push(repo.insertIncludedMealStatement({
-        id: newId(), bookingId, itemId, includedMealId: m.meal.id, categoryId: m.meal.food_category_id,
-        optionId: m.option?.id ?? null, name: m.dto.name, persons: m.dto.personsPerNight, nights: q.nights, now: at,
-      }));
     }
 
     // Kitchen orders: one per category × service date; extra portions take daily capacity.
@@ -253,7 +259,8 @@ export class BookingService {
         id: newId(), bookingId, orderId: orders.get(`${line.category.id}|${d.serviceDate}`)!.id, optionId: d.optionId,
         date: d.serviceDate, name: d.name, categoryCode: d.categoryCode, pricingType: d.pricingType, unitPrice: d.unitPriceSatang,
         childPricing: line.option.child_pricing, childPrice: line.childPriceSatang, adults: d.adults, children: d.children,
-        quantity: d.quantity, included: d.includedQuantity, subtotal: d.subtotalSatang, now: at,
+        quantity: d.quantity, included: d.includedQuantity, subtotal: d.subtotalSatang,
+        itemId: line.stayIndex === undefined ? null : itemIds[line.stayIndex]!, now: at,
       }));
     }
 
@@ -268,7 +275,7 @@ export class BookingService {
 
     statements.push(this.log.eventStatement("BOOKING_CREATED", "INFO", meta, { identifier: code }));
     statements.push(this.log.auditStatement(null, "CREATE_BOOKING", "bookings", bookingId, null,
-      { bookingCode: code, itemType: q.item.type, checkIn: q.checkIn, checkOut: q.checkOut, totalSatang: q.totalSatang }, meta));
+      { bookingCode: code, stays: q.items.map((it) => it.type), checkIn: q.checkIn, checkOut: q.checkOut, totalSatang: q.totalSatang }, meta));
     return statements;
   }
 
@@ -385,6 +392,7 @@ export class BookingService {
         itemType: r.item_type,
         itemName: r.item_name,
         quantity: r.quantity,
+        stays: parseStays(r.stays_json),
         tarps: r.tarps,
         customerName: r.customer_name,
         customerPhone: r.customer_phone,
@@ -416,6 +424,50 @@ export class BookingService {
     if (!(results[0]?.results.length)) throw new ConflictError("The booking changed meanwhile, please reload", "BOOKING_NOT_CANCELLABLE");
     await this.log.auditStatement(actor.userId, "CANCEL_BOOKING", "bookings", row.id,
       { status: row.booking_status, paymentStatus: row.payment_status }, { status: "CANCELLED", reason }, meta).run();
+    return this.toAdmin((await this.repo.findByCode(row.booking_code))!);
+  }
+
+  /**
+   * Cancels ONE stay of a booking that holds several (the booking goes on): its nights / tents / tarp area and the
+   * meals that came with it are given back, and the booking's money is worked out again from the stays left —
+   * accommodation, total and, on a deposit plan, the deposit (what each stay left for check-in). Money already paid
+   * beyond the new total is shown as overpaid, for staff to refund (payments → refund).
+   */
+  async cancelStay(actor: AuthContext, code: string, itemId: string, reason: string, meta: RequestMeta): Promise<AdminBookingDto> {
+    await this.authz.requirePermission(actor, "bookings.cancel", meta);
+    const row = await this.expireIfDue(await this.findOr404(code));
+    if (row.booking_status !== "PENDING" && row.booking_status !== "CONFIRMED") {
+      throw new ConflictError("Only pending or confirmed bookings can change", "BOOKING_NOT_CANCELLABLE");
+    }
+    const [items, tarp, payments] = await Promise.all([this.repo.items(row.id), this.repo.tarp(row.id), this.payments.payments(row.id)]);
+    const target = items.find((i) => i.id === itemId);
+    if (!target) throw new NotFoundError("This stay is not part of the booking", "STAY_NOT_FOUND");
+    if (target.status !== "ACTIVE") throw new ConflictError("This stay is already cancelled", "STAY_ALREADY_CANCELLED");
+    const left = items.filter((i) => i.status === "ACTIVE" && i.id !== itemId);
+    if (!left.length) throw new ConflictError("This is the booking's only stay: cancel the booking instead", "LAST_STAY");
+    // A payment being checked was for the old amount: settle it first.
+    if (payments.some((p) => p.status === "PENDING_VERIFICATION")) {
+      throw new ConflictError("A payment for this booking is being checked", "SLIP_PENDING");
+    }
+    const adults = row.adults - target.adults;
+    const children = row.children - target.children;
+    if (adults < 1) throw new ConflictError("The stays left would have no adult", "NO_ADULT_LEFT");
+
+    const camping = target.item_type === "OWN_TENT";
+    const tarpMoney = camping && tarp?.status === "ACTIVE" ? tarp.subtotal_satang : 0;
+    const accommodation = row.accommodation_subtotal_satang - target.snapshot_subtotal_satang - tarpMoney;
+    const total = accommodation + row.food_subtotal_satang - row.discount_satang;
+    const deposit = depositFor(total, left.reduce((acc, i) => acc + i.pay_later_satang, 0));
+    const now = iso(this.clock());
+    const results = await this.db.batch(this.repo.cancelStayStatements({
+      bookingId: row.id, itemId, readAt: row.updated_at, reason, now, checkIn: row.check_in, checkOut: row.check_out,
+      tents: camping ? target.quantity : 0, tarp: tarpMoney > 0,
+      booking: { accommodation, total, deposit, adults, children },
+    }));
+    if (!results[0]?.results.length) throw new ConflictError("The booking changed meanwhile, please reload", "BOOKING_CHANGED");
+    await this.log.auditStatement(actor.userId, "CANCEL_STAY", "bookings", row.id,
+      { stay: target.unit_name_snapshot, totalSatang: row.total_satang, depositSatang: row.deposit_satang },
+      { bookingCode: row.booking_code, itemId, reason, totalSatang: total, depositSatang: deposit, paidSatang: paidOf(payments) }, meta).run();
     return this.toAdmin((await this.repo.findByCode(row.booking_code))!);
   }
 
@@ -585,9 +637,12 @@ export class BookingService {
     if (orders.some((o) => (KITCHEN_STARTED as readonly string[]).includes(o.status))) {
       throw new ConflictError("The kitchen has started on a meal of this booking", "KITCHEN_STARTED");
     }
-    const item = items.find((i) => i.status === "ACTIVE");
-    if (!item) throw new ConflictError("This booking has nothing to move", "BOOKING_STATUS_INVALID");
-    return { item, orders: orders.filter((o) => o.status !== "CANCELLED" && o.capacity_reserved > 0), tarps: tarp?.status === "ACTIVE" ? tarp.quantity : 0 };
+    // Every stay still on moves together (same dates for all the stays of a booking).
+    const live = items.filter((i) => i.status === "ACTIVE");
+    if (!live.length) throw new ConflictError("This booking has nothing to move", "BOOKING_STATUS_INVALID");
+    const units = live.filter((i) => i.unit_id).map((i) => ({ unitId: i.unit_id!, itemId: i.id }));
+    const tents = live.filter((i) => !i.unit_id).reduce((acc, i) => acc + i.quantity, 0);
+    return { units, tents, orders: orders.filter((o) => o.status !== "CANCELLED" && o.capacity_reserved > 0), tarps: tarp?.status === "ACTIVE" ? tarp.quantity : 0 };
   }
 
   /** Everything the day check needs for new check-in days in [from, to), read once. */
@@ -598,16 +653,18 @@ export class BookingService {
     let unitTaken: Set<string> | null = null;
     let tents: MoveInputs["tents"] = null;
     let tarps: MoveInputs["tarps"] = null;
-    if (plan.item.unit_id) {
-      unitTaken = await this.moves.unitTaken(plan.item.unit_id, row.id, from, until);
-    } else {
+    if (plan.units.length) {
+      // A night is taken when any of the booking's houses / VIP tents is held by someone else (or blocked).
+      unitTaken = new Set((await Promise.all(plan.units.map((u) => this.moves.unitTaken(u.unitId, row.id, from, until)))).flatMap((t) => [...t]));
+    }
+    if (plan.tents > 0) {
       const [settings, nights, tarpNights] = await Promise.all([
         this.moves.campingSettings(), this.moves.campingNights(from, until),
         plan.tarps > 0 ? this.moves.tarpNights(from, until) : Promise.resolve([]),
       ]);
       const byDate = new Map(nights.map((n) => [n.stay_date, n]));
       const tarpByDate = new Map(tarpNights.map((n) => [n.stay_date, n]));
-      const need = plan.item.quantity;
+      const need = plan.tents;
       tents = {
         need,
         free: (d) => (settings?.is_enabled !== 1 ? 0
@@ -680,8 +737,8 @@ export class BookingService {
         from: { checkIn: row.check_in, checkOut: row.check_out },
         to: { checkIn, checkOut },
         offset: diffDays(row.check_in, checkIn),
-        unit: plan.item.unit_id ? { unitId: plan.item.unit_id, itemId: plan.item.id } : null,
-        tents: plan.item.unit_id ? 0 : plan.item.quantity,
+        units: plan.units,
+        tents: plan.tents,
         tarps: plan.tarps,
         now,
       }));
@@ -744,7 +801,26 @@ export class BookingService {
     const later = row.confirmed_at ? payments.filter((p) => p.submitted_at > row.confirmed_at!) : [];
     const reviewing = payments.some((p) => p.status === "PENDING_VERIFICATION");
     const lastLater = later.at(-1);
-    const item = items[0]!;
+    // Stays in the order chosen; one cancelled alone by staff (the booking goes on) is marked so.
+    const stays = items.map((i): QuoteItemDto => ({
+      id: i.id,
+      status: i.cancelled_at ? "CANCELLED" : "ACTIVE",
+      cancelReason: i.cancel_reason,
+      type: i.item_type,
+      unitId: i.unit_id,
+      slug: i.slug,
+      name: i.unit_name_snapshot,
+      quantity: i.quantity,
+      pricingType: i.pricing_type,
+      nightly: i.nightly_prices_json ? (JSON.parse(i.nightly_prices_json) as NightPriceDto[]) : [],
+      subtotalSatang: i.snapshot_subtotal_satang,
+      adults: i.adults,
+      children: i.children,
+      payLaterSatang: i.pay_later_satang,
+    }));
+    const cancelledAlone = new Set(items.filter((i) => i.cancelled_at).map((i) => i.id));
+    const live = stays.filter((x) => x.status === "ACTIVE");
+    const ended = row.booking_status === "CANCELLED" || row.booking_status === "EXPIRED";
     return {
       bookingCode: row.booking_code,
       status: row.booking_status as BookingStatus,
@@ -768,23 +844,18 @@ export class BookingService {
       nights: row.nights,
       adults: row.adults,
       children: row.children,
-      item: {
-        type: item.item_type,
-        unitId: item.unit_id,
-        slug: item.slug,
-        name: item.unit_name_snapshot,
-        quantity: item.quantity,
-        pricingType: item.pricing_type,
-        nightly: item.nightly_prices_json ? (JSON.parse(item.nightly_prices_json) as NightPriceDto[]) : [],
-        subtotalSatang: item.snapshot_subtotal_satang,
-      },
-      tarp: tarp ? {
+      items: stays,
+      item: live[0] ?? stays[0]!,
+      // The tarp area belongs to the camping stay: gone with it when staff cancelled that stay alone.
+      tarp: tarp && (tarp.status === "ACTIVE" || ended) ? {
         quantity: tarp.quantity, pricePerNightSatang: tarp.price_per_night_satang, nights: tarp.number_of_nights, subtotalSatang: tarp.subtotal_satang,
       } : null,
-      includedMeals: included.map((m) => ({
+      // Meals of a stay cancelled alone went with it; with several stays, each meal says which stay it comes with.
+      includedMeals: included.filter((m) => !cancelledAlone.has(m.booking_item_id)).map((m) => ({
         categoryCode: m.category_code, name: m.meal_name_snapshot, personsPerNight: m.persons_per_night_snapshot, nights: m.number_of_nights,
+        ...(live.length > 1 ? { stayName: m.stay_name } : {}),
       })),
-      food: food.map((f): FoodLineDto => ({
+      food: food.filter((f) => ended || f.status !== "CANCELLED").map((f): FoodLineDto => ({
         optionId: f.food_option_id,
         categoryCode: f.category_code_snapshot,
         name: f.option_name_snapshot,
@@ -817,6 +888,8 @@ export class BookingService {
       ...(await this.toPublic(row)),
       // The deposit was fixed at booking time: a later switch of the stay to full payment does not change this booking.
       depositPlanKept: modeToday === "FULL",
+      // A stay cancelled after payment: money received beyond the new total, for staff to refund.
+      overpaidSatang: row.booking_status === "CANCELLED" || row.booking_status === "EXPIRED" ? 0 : Math.max(0, paidOf(payments) - row.total_satang),
       paymentAccount: snapshot ? {
         receivingAccountId: snapshot.receiving_account_id,
         bankName: snapshot.bank_name_snapshot,

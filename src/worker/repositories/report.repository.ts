@@ -1,4 +1,5 @@
 import type { D1DatabaseLike } from "../env.ts";
+import { STAY_NAMES_SQL, STAYS_MONEY_JSON_SQL } from "./stay-sql.ts";
 
 /** Statuses that count as a sale (spec §26) and payment states that count as money received. */
 export const SOLD = "('CONFIRMED', 'CHECKED_IN', 'CHECKED_OUT', 'NO_SHOW')";
@@ -14,6 +15,8 @@ export interface StayRow {
   children: number;
   accommodation_subtotal_satang: number;
   discount_satang: number;
+  /** This stay's own price (camping: with the tarp area) — a booking may hold several stays. */
+  stay_subtotal_satang: number;
   item_type: "HOUSE" | "VIP_TENT" | "OWN_TENT";
   unit_id: string | null;
   quantity: number;
@@ -49,6 +52,8 @@ export interface BookingReportRow {
   customer_name: string;
   item_type: string;
   item_name: string;
+  /** Every stay with its price (STAYS_MONEY_JSON_SQL). */
+  stays_json: string | null;
 }
 
 export interface PaymentReportRow {
@@ -95,15 +100,19 @@ export class ReportRepository {
   async soldStays(from: string, toExclusive: string): Promise<StayRow[]> {
     const { results } = await this.db
       .prepare(
-        `SELECT b.id AS booking_id, b.booking_code, b.payment_status, b.check_in, b.check_out, b.adults, b.children,
+        `SELECT b.id AS booking_id, b.booking_code, b.payment_status, b.check_in, b.check_out, i.adults, i.children,
                 b.accommodation_subtotal_satang, b.discount_satang,
+                s.subtotal_satang + CASE WHEN i.item_type = 'OWN_TENT'
+                  THEN (SELECT COALESCE(SUM(t.subtotal_satang), 0) FROM booking_tarps t WHERE t.booking_id = b.id AND t.status = 'ACTIVE') ELSE 0 END
+                  AS stay_subtotal_satang,
                 i.item_type, i.unit_id, i.quantity, s.unit_name_snapshot, s.nightly_prices_json,
-                (SELECT COALESCE(SUM(t.quantity), 0) FROM booking_tarps t WHERE t.booking_id = b.id AND t.status = 'ACTIVE') AS tarps
+                CASE WHEN i.item_type = 'OWN_TENT'
+                  THEN (SELECT COALESCE(SUM(t.quantity), 0) FROM booking_tarps t WHERE t.booking_id = b.id AND t.status = 'ACTIVE') ELSE 0 END AS tarps
            FROM bookings b
-           JOIN booking_items i ON i.booking_id = b.id
+           JOIN booking_items i ON i.booking_id = b.id AND i.status = 'ACTIVE'
            JOIN booking_price_snapshots s ON s.booking_item_id = i.id
           WHERE b.booking_status IN ${SOLD} AND b.check_in < ?2 AND b.check_out > ?1
-          ORDER BY b.check_in, b.booking_code`,
+          ORDER BY b.check_in, b.booking_code, i.created_at, i.id`,
       )
       .bind(from, toExclusive)
       .all<StayRow>();
@@ -131,7 +140,8 @@ export class ReportRepository {
     const { results } = await this.db
       .prepare(
         `SELECT b.booking_code, date(b.created_at, ?3) AS created_day, b.source, b.check_in, b.check_out, b.nights, b.adults, b.children,
-                b.booking_status, b.payment_status, b.total_satang, b.customer_name, i.item_type, s.unit_name_snapshot AS item_name
+                b.booking_status, b.payment_status, b.total_satang, b.customer_name, i.item_type,
+                COALESCE(${STAY_NAMES_SQL}, s.unit_name_snapshot) AS item_name, ${STAYS_MONEY_JSON_SQL} AS stays_json
            FROM bookings b
            JOIN booking_items i ON i.id = (SELECT id FROM booking_items WHERE booking_id = b.id ORDER BY created_at, id LIMIT 1)
            JOIN booking_price_snapshots s ON s.booking_item_id = i.id
@@ -201,8 +211,7 @@ export class ReportRepository {
       .prepare(
         `SELECT o.id AS order_id, o.service_date, o.food_category_id AS category_id, c.code AS category_code, c.service_time,
                 o.status, o.kitchen_note, b.booking_code, b.booking_status, b.payment_status, b.customer_name, b.adults, b.children,
-                (SELECT s.unit_name_snapshot FROM booking_items i JOIN booking_price_snapshots s ON s.booking_item_id = i.id
-                  WHERE i.booking_id = b.id ORDER BY i.created_at, i.id LIMIT 1) AS item_name
+                ${STAY_NAMES_SQL} AS item_name
            FROM food_orders o JOIN bookings b ON b.id = o.booking_id JOIN food_categories c ON c.id = o.food_category_id
           WHERE o.status <> 'CANCELLED' AND o.service_date >= ?1 AND o.service_date < ?2
           ORDER BY o.service_date, c.sort_order, c.code, b.booking_code`,

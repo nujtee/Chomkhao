@@ -91,7 +91,8 @@ export class BookingMoveRepository {
     to: { checkIn: string; checkOut: string };
     /** Days between the old and the new check-in. */
     offset: number;
-    unit: { unitId: string; itemId: string } | null;
+    /** The booking's houses / VIP tents (several stays move together). */
+    units: { unitId: string; itemId: string }[];
     tents: number;
     tarps: number;
     now: string;
@@ -113,18 +114,20 @@ export class BookingMoveRepository {
         .bind(...head, p.to.checkOut, p.from.checkIn, p.from.checkOut),
     ];
 
-    if (p.unit) {
+    if (p.units.length) {
       statements.push(db.prepare(`DELETE FROM booking_unit_nights WHERE booking_id = ?1 AND ${moved}`).bind(...head));
-      for (const night of newNights) {
-        // PRIMARY KEY (unit_id, stay_date): a night already held fails the whole batch.
-        statements.push(
-          db
-            .prepare(
-              `INSERT INTO booking_unit_nights (unit_id, stay_date, booking_id, booking_item_id, created_at)
-               SELECT ?4, ?5, ?1, ?6, ?3 WHERE ${moved}`,
-            )
-            .bind(...head, p.unit.unitId, night, p.unit.itemId),
-        );
+      for (const unit of p.units) {
+        for (const night of newNights) {
+          // PRIMARY KEY (unit_id, stay_date): a night already held fails the whole batch.
+          statements.push(
+            db
+              .prepare(
+                `INSERT INTO booking_unit_nights (unit_id, stay_date, booking_id, booking_item_id, created_at)
+                 SELECT ?4, ?5, ?1, ?6, ?3 WHERE ${moved}`,
+              )
+              .bind(...head, unit.unitId, night, unit.itemId),
+          );
+        }
       }
     }
 

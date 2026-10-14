@@ -11,6 +11,8 @@ import { PaymentPanel } from "../payments/PaymentPanel.tsx";
 import { BookingStatusBadge, useStayDate } from "./shared.tsx";
 import { MoveDates } from "./MoveDates.tsx";
 import { StayButtons } from "./StayButtons.tsx";
+import { StaysCard } from "./StaysCard.tsx";
+import { staysText } from "./shared.tsx";
 
 export function BookingDetailPage({ code }: { code: string }) {
   const { t, c, can, href, locale } = useAdmin();
@@ -63,8 +65,6 @@ export function BookingDetailPage({ code }: { code: string }) {
 
   const cancellable = (b.status === "PENDING" || b.status === "CONFIRMED") && can("bookings.cancel");
   const movable = (b.status === "PENDING" || b.status === "CONFIRMED") && can("bookings.edit");
-  /** Snapshots keep the nights as booked: after a date change their dates are the original ones. */
-  const moved = b.item.nightly.length > 0 && b.item.nightly[0]!.date !== b.checkIn;
   const extraFood = b.food.filter((f) => f.includedQuantity === 0);
   const includedFood = b.food.filter((f) => f.includedQuantity > 0);
 
@@ -91,7 +91,8 @@ export function BookingDetailPage({ code }: { code: string }) {
         <div className="adm-card">
           <h2 className="adm-h2">{t.bk.stay}</h2>
           <dl className="adm-dl">
-            <dt>{t.bk.item}</dt><dd>{b.item.name}{b.item.type === "OWN_TENT" && ` · ${format(t.bk.tents, { n: b.item.quantity })}`}{b.tarp && ` + ${t.bk.tarp}`}</dd>
+            <dt>{t.bk.item}</dt>
+            <dd>{staysText(b.items.filter((i) => i.status !== "CANCELLED"), (n) => format(t.bk.tents, { n }))}{b.tarp && ` + ${t.bk.tarp}`}</dd>
             <dt>{t.bk.stay}</dt><dd>{stayDate(b.checkIn)} → {stayDate(b.checkOut)} ({format(t.bk.nights, { n: b.nights })})</dd>
             <dt>{t.bk.guest}</dt><dd>{format(t.bk.guests, { adults: b.adults, children: b.children })}</dd>
             <dt>{t.bk.payment}</dt><dd>{t.bk[`p${b.paymentStatus}`]}</dd>
@@ -115,32 +116,15 @@ export function BookingDetailPage({ code }: { code: string }) {
         </div>
       </div>
 
-      <div className="adm-card">
-        <h2 className="adm-h2">{t.bk.nightly}</h2>
-        {moved && <p className="adm-field__hint">{t.bk.nightlyMoved}</p>}
-        <div className="adm-tablewrap">
-          <table className="adm-table">
-            <tbody>
-              {b.item.nightly.map((n) => (
-                <tr key={n.date}>
-                  <td>{stayDate(n.date)}</td>
-                  <td className="adm-num">{baht(n.priceSatang)} {b.item.pricingType === "PER_ADULT_NIGHT" ? t.bk.perAdultNight : t.bk.perNight}</td>
-                </tr>
-              ))}
-              {b.tarp && (
-                <tr>
-                  <td>{format(t.bk.tarpNights, { n: b.tarp.nights })}</td>
-                  <td className="adm-num">{baht(b.tarp.subtotalSatang)} ({baht(b.tarp.pricePerNightSatang)} {t.bk.perNight})</td>
-                </tr>
-              )}
-              <tr className="adm-table__total"><th scope="row">{t.bk.accommodationSubtotal}</th><td className="adm-num">{baht(b.accommodationSubtotalSatang)}</td></tr>
-            </tbody>
-          </table>
-        </div>
+      <StaysCard booking={b} onChanged={stayChanged} />
 
+      <div className="adm-card">
         {(b.includedMeals.length > 0 || b.food.length > 0) && <h2 className="adm-h2">{t.bk.food}</h2>}
-        {b.includedMeals.map((m) => (
-          <p key={m.categoryCode} className="adm-small">{t.bk.includedMeals}: {m.name} · {format(t.bk.persons, { n: m.personsPerNight })} × {format(t.bk.nights, { n: m.nights })}</p>
+        {b.includedMeals.map((m, i) => (
+          <p key={`${m.categoryCode}|${i}`} className="adm-small">
+            {t.bk.includedMeals}: {m.name} · {format(t.bk.persons, { n: m.personsPerNight })} × {format(t.bk.nights, { n: m.nights })}
+            {m.stayName && <span className="adm-muted"> ({m.stayName})</span>}
+          </p>
         ))}
         {b.food.length > 0 && (
           <div className="adm-tablewrap">
@@ -165,7 +149,7 @@ export function BookingDetailPage({ code }: { code: string }) {
         <p className="adm-total">{t.bk.total}: <strong>{baht(b.totalSatang)}</strong></p>
       </div>
 
-      {can("payments.view") && <PaymentPanel key={`${b.status}-${b.paymentStatus}-${b.payments.length}`} booking={b} notice={paymentNotice}
+      {can("payments.view") && <PaymentPanel key={`${b.status}-${b.paymentStatus}-${b.payments.length}-${b.totalSatang}-${b.depositSatang ?? ""}`} booking={b} notice={paymentNotice}
         onChanged={(text) => { setPaymentNotice(text ?? null); setVersion((v) => v + 1); }} />}
 
       {cancellable && (

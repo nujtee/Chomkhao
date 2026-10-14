@@ -152,6 +152,7 @@ export function createApp(options: AppOptions = {}) {
     .get("/api/admin/bookings", book.list)
     .get("/api/admin/bookings/:code", book.get)
     .post("/api/admin/bookings/:code/cancel", book.cancel)
+    .post("/api/admin/bookings/:code/stays/:itemId/cancel", book.cancelStay)
     .get("/api/admin/bookings/:code/move-options", book.moveOptions)
     .post("/api/admin/bookings/:code/move", book.move)
     .get("/api/admin/bookings/:code/balance", book.balance)

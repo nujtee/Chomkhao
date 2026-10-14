@@ -1,3 +1,4 @@
+import { parseStays } from "../repositories/stay-sql.ts";
 import { stayActions } from "../../shared/stay.ts";
 import { balanceDue } from "../../shared/booking-rules.ts";
 import type { BookingStatus, PaymentStatus } from "../../shared/booking-types.ts";
@@ -168,6 +169,7 @@ export class DashboardService {
         unitId: b.unit_id,
         itemName: b.item_name,
         quantity: b.quantity,
+        stays: parseStays(b.stays_json),
         tarps: b.tarps,
         adults: b.adults,
         children: b.children,
@@ -196,6 +198,7 @@ function stayRow(r: BookingItemListRow, today: string): StayRowDto {
     itemType: r.item_type,
     itemName: r.item_name,
     quantity: r.quantity,
+    stays: parseStays(r.stays_json),
     tarps: r.tarps,
     adults: r.adults,
     children: r.children,

@@ -36,3 +36,8 @@ export function PaymentBadge({ status }: { status: PaymentStatus }) {
   const { t } = useAdmin();
   return <span className={`adm-badge adm-badge--${PAY_TONE[status]}`}>{t.bk[`p${status}`]}</span>;
 }
+
+/** Every stay of a booking in one line: "House 01 + VIP-02 + Camping · 2 tents". */
+export function staysText(stays: { type: string; name: string; quantity: number }[], tents: (n: number) => string): string {
+  return stays.map((s) => (s.type === "OWN_TENT" ? `${s.name} · ${tents(s.quantity)}` : s.name)).join(" + ");
+}

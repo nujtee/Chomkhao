@@ -5,7 +5,7 @@ import { format } from "../../../shared/i18n/admin-messages.ts";
 import { apiGet } from "../../api/client.ts";
 import { Link } from "../../router/Router.tsx";
 import { useAdmin } from "../AdminContext.tsx";
-import { BookingStatusBadge, PaymentBadge } from "../bookings/shared.tsx";
+import { BookingStatusBadge, PaymentBadge, staysText } from "../bookings/shared.tsx";
 import { StayButtons } from "../bookings/StayButtons.tsx";
 import { Alert, errorMessage, useDateFormatter } from "../ui.tsx";
 
@@ -179,7 +179,7 @@ function StayList({ title, empty, rows, only, onStay }: {
             <li key={r.bookingCode}>
               <Link to={href("bookings", r.bookingCode)} className="adm-mono">{r.bookingCode}</Link>
               <span>{r.customerName}</span>
-              <span className="adm-muted">{r.itemName}{r.itemType === "OWN_TENT" ? ` × ${r.quantity}` : ""}{r.tarps > 0 ? ` + ${t.bk.tarp}` : ""} · {format(c.cal.guests, { adults: r.adults, children: r.children })}</span>
+              <span className="adm-muted">{(r.stays?.length ?? 0) > 1 ? staysText(r.stays, (n) => `× ${n}`).replace(/ · ×/g, " ×") : `${r.itemName}${r.itemType === "OWN_TENT" ? ` × ${r.quantity}` : ""}`}{r.tarps > 0 ? ` + ${t.bk.tarp}` : ""} · {format(c.cal.guests, { adults: r.adults, children: r.children })}</span>
               <span className="adm-row adm-row--wrap"><BookingStatusBadge status={r.status} /> <PaymentBadge status={r.paymentStatus} /> {formatBaht(r.totalSatang, locale.code)}</span>
               <StayButtons compact only={only} code={r.bookingCode} checkIn={r.checkIn} actions={r.stayActions}
                 balanceSatang={r.status === "CONFIRMED" ? r.balanceSatang : 0} onDone={(_, message) => onStay(message)} />

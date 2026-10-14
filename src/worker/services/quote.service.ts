@@ -8,12 +8,13 @@ import type {
   IncludedMealDto,
   NightPriceDto,
   QuoteDto,
-  StaySelection,
+  QuoteItemDto,
   TarpLineDto,
 } from "../../shared/booking-types.ts";
-import { depositDue } from "../../shared/booking-rules.ts";
+import { MAX_STAYS_PER_BOOKING } from "../../shared/booking-types.ts";
+import { depositFor, payLaterOf } from "../../shared/booking-rules.ts";
 import { DEFAULT_TIMEZONE, addDays, dayOfWeek, localDateTimeIn, todayIn } from "../../shared/dates.ts";
-import { ConflictError, NotFoundError, ValidationError } from "../http/errors.ts";
+import { ConflictError, HttpError, NotFoundError, ValidationError } from "../http/errors.ts";
 import type { AccommodationRepository, UnitRow } from "../repositories/accommodation.repository.ts";
 import type { CampingSettingsRow, InventoryRepository } from "../repositories/inventory.repository.ts";
 import type {
@@ -31,12 +32,21 @@ import { publicMediaUrl } from "./media-url.ts";
 import { pickTranslation } from "./accommodation.service.ts";
 import type { AvailabilityService } from "./availability.service.ts";
 
+/** One stay of the request, with its own guests (the parser fills them in for a legacy single `stay`). */
+export type StayInput =
+  | { kind: "UNIT"; unitId: string; adults: number; children: number }
+  | { kind: "CAMPING"; tents: number; tarp: boolean; adults: number; children: number };
+
 export interface QuoteInput {
   checkIn: string;
   checkOut: string;
+  /** All guests: the sum of the stays' guests. */
   adults: number;
   children: number;
-  stay: StaySelection;
+  /** One or more stays on the same dates (same check-in / check-out for all). */
+  stays: StayInput[];
+  /** The request used the single `stay` field (older pages): errors keep their old keys (guests, tents …). */
+  legacy?: boolean;
   food: FoodSelection[];
   lang: string;
 }
@@ -50,6 +60,8 @@ export interface PreparedFoodLine {
   capacityQuantity: number;
   /** Persons the kitchen prepares for. */
   persons: number;
+  /** Included meal: index of the stay it comes with (in PreparedBooking.stays). */
+  stayIndex?: number;
 }
 
 export interface PreparedIncludedMeal {
@@ -58,16 +70,28 @@ export interface PreparedIncludedMeal {
   dto: IncludedMealDto;
 }
 
+/** One stay of the booking, priced. */
+export interface PreparedStay {
+  item: QuoteItemDto;
+  /** The house / VIP tent; null for own-tent camping. */
+  unit: UnitRow | null;
+  /** Own-tent camping: tents taken each night. */
+  tents: number;
+  /** Tarp area of the camping stay. */
+  tarp: TarpLineDto | null;
+  /** Meals that come with this stay. */
+  included: PreparedIncludedMeal[];
+}
+
 /** Everything booking creation needs — computed once, from D1, on the server. */
 export interface PreparedBooking {
   quote: QuoteDto;
   nights: string[];
-  unit: UnitRow | null;
+  stays: PreparedStay[];
   camping: CampingSettingsRow | null;
-  tents: number;
-  /** Tarp area add-on (camping only). */
+  /** Tarp area add-on (the camping stay's, if any). */
   tarp: TarpLineDto | null;
-  included: PreparedIncludedMeal[];
+  /** Included lines (with `stayIndex`) then extra food. */
   foodLines: PreparedFoodLine[];
   settings: BookingSettingsRow;
 }
@@ -147,89 +171,133 @@ export class QuoteService {
       maxNights: settings.max_nights,
       maxAdvanceDays: settings.max_advance_days,
     });
-    const guests = input.adults + input.children;
+    if (!input.stays.length) throw new ValidationError({ stays: "REQUIRED" });
+    if (input.stays.length > MAX_STAYS_PER_BOOKING) throw new ValidationError({ stays: "TOO_MANY" });
+    // Each house / VIP tent once; camping once (its tents and tarp area are counted in it).
+    const units = input.stays.flatMap((s, i) => (s.kind === "UNIT" ? [[s.unitId, i] as const] : []));
+    const seen = new Map<string, number>();
+    for (const [unitId, i] of units) {
+      if (seen.has(unitId)) throw new ValidationError({ [`stays.${i}.unitId`]: "DUPLICATE" });
+      seen.set(unitId, i);
+    }
+    if (input.stays.filter((s) => s.kind === "CAMPING").length > 1) throw new ValidationError({ stays: "ONE_CAMPING" });
+    if (input.adults < 1) throw new ValidationError({ adults: "OUT_OF_RANGE" });
+
+    const several = input.stays.length > 1;
     const lastNight = nights[nights.length - 1]!;
-
-    let unit: UnitRow | null = null;
     let camping: CampingSettingsRow | null = null;
-    let tents = 0;
-    let tarp: TarpLineDto | null = null;
-    let item: QuoteDto["item"];
+    const stays: PreparedStay[] = [];
+    for (const [i, stay] of input.stays.entries()) {
+      const key = (k: string) => (input.legacy ? k : `stays.${i}.${k}`);
+      const guests = stay.adults + stay.children;
+      if (guests < 1) throw new ValidationError({ [key("guests")]: "REQUIRED" });
 
-    if (input.stay.kind === "UNIT") {
-      unit = await this.units.findUnit(input.stay.unitId);
-      if (!unit || unit.status !== "ACTIVE") throw new NotFoundError("Accommodation not found", "ACCOMMODATION_NOT_FOUND");
-      const errors: Record<string, string> = {};
-      if (guests > unit.max_guests) errors.guests = "EXCEEDS_MAX_GUESTS";
-      if (unit.max_adults !== null && input.adults > unit.max_adults) errors.adults = "EXCEEDS_MAX_ADULTS";
-      if (Object.keys(errors).length) throw new ValidationError(errors);
-      const locks = await this.inventory.nightLocks(input.checkIn, input.checkOut, unit.id);
-      if (locks.length) throw new ConflictError("This accommodation is not available for the selected dates", "UNIT_UNAVAILABLE");
+      if (stay.kind === "UNIT") {
+        const unit = await this.units.findUnit(stay.unitId);
+        if (!unit || unit.status !== "ACTIVE") throw new NotFoundError("Accommodation not found", "ACCOMMODATION_NOT_FOUND");
+        const errors: Record<string, string> = {};
+        if (guests > unit.max_guests) errors[key("guests")] = "EXCEEDS_MAX_GUESTS";
+        if (unit.max_adults !== null && stay.adults > unit.max_adults) errors[key("adults")] = "EXCEEDS_MAX_ADULTS";
+        if (Object.keys(errors).length) throw new ValidationError(errors);
+        const locks = await this.inventory.nightLocks(input.checkIn, input.checkOut, unit.id);
+        // Which one, when the booking holds several stays.
+        if (locks.length) throw new HttpError(409, "UNIT_UNAVAILABLE", "This accommodation is not available for the selected dates", { unitId: unit.id });
 
-      const rules = await this.pricing.activeRules({ unitId: unit.id, unitType: unit.unit_type }, nights[0]!, lastNight);
-      const nightly = nights.map((date) => ({ date, priceSatang: nightPrice(rules, date, unit!.base_price_satang) }));
-      const names = Object.fromEntries((await this.units.translations([unit.id])).map((t) => [t.language_code, t.name]));
-      item = {
-        type: unit.unit_type,
-        unitId: unit.id,
-        slug: unit.slug,
-        name: pickTranslation(names, input.lang) ?? unit.unit_code,
-        quantity: 1,
-        pricingType: "PER_UNIT_NIGHT",
-        nightly,
-        subtotalSatang: sum(nightly),
-      };
-    } else {
-      camping = await this.inventory.campingSettings();
-      if (!camping || camping.is_enabled !== 1) throw new NotFoundError("Camping is not available", "CAMPING_UNAVAILABLE");
-      tents = input.stay.tents;
-      const errors: Record<string, string> = {};
-      if (!Number.isInteger(tents) || tents < 1 || tents > settings.max_tents_per_booking) errors.tents = "OUT_OF_RANGE";
-      else if (camping.max_guests_per_tent !== null && guests > tents * camping.max_guests_per_tent) errors.guests = "TOO_MANY_PER_TENT";
-      if (Object.keys(errors).length) throw new ValidationError(errors);
-      const capacity = await this.availability.campingNights(nights);
-      if (capacity.some((n) => n.remaining < tents)) throw new ConflictError("Not enough camping space for these nights", "CAMPING_FULL");
+        const rules = await this.pricing.activeRules({ unitId: unit.id, unitType: unit.unit_type }, nights[0]!, lastNight);
+        const nightly = nights.map((date) => ({ date, priceSatang: nightPrice(rules, date, unit.base_price_satang) }));
+        const names = Object.fromEntries((await this.units.translations([unit.id])).map((t) => [t.language_code, t.name]));
+        const subtotalSatang = sum(nightly);
+        stays.push({
+          item: {
+            type: unit.unit_type,
+            unitId: unit.id,
+            slug: unit.slug,
+            name: pickTranslation(names, input.lang) ?? unit.unit_code,
+            quantity: 1,
+            pricingType: "PER_UNIT_NIGHT",
+            nightly,
+            subtotalSatang,
+            adults: stay.adults,
+            children: stay.children,
+            // Deposit plan of this house / VIP tent (migration 0025): half of its stay left for check-in.
+            payLaterSatang: payLaterOf(unit.payment_mode ?? "FULL", subtotalSatang),
+          },
+          unit,
+          tents: 0,
+          tarp: null,
+          included: [],
+        });
+      } else {
+        camping = await this.inventory.campingSettings();
+        if (!camping || camping.is_enabled !== 1) throw new NotFoundError("Camping is not available", "CAMPING_UNAVAILABLE");
+        const tents = stay.tents;
+        const errors: Record<string, string> = {};
+        if (!Number.isInteger(tents) || tents < 1 || tents > settings.max_tents_per_booking) errors[key("tents")] = "OUT_OF_RANGE";
+        else if (camping.max_guests_per_tent !== null && guests > tents * camping.max_guests_per_tent) errors[key("guests")] = "TOO_MANY_PER_TENT";
+        // Camping is priced per adult: someone has to be an adult.
+        if (stay.adults < 1) errors[key("adults")] = "OUT_OF_RANGE";
+        if (Object.keys(errors).length) throw new ValidationError(errors);
+        const capacity = await this.availability.campingNights(nights);
+        if (capacity.some((n) => n.remaining < tents)) throw new ConflictError("Not enough camping space for these nights", "CAMPING_FULL");
 
-      const rules = await this.pricing.activeRules("CAMPING", nights[0]!, lastNight);
-      const nightly = nights.map((date) => ({ date, priceSatang: nightPrice(rules, date, camping!.price_per_adult_night_satang) }));
-      const names = Object.fromEntries((await this.inventory.campingTranslations()).map((t) => [t.language_code, t.name]));
-      item = {
-        type: "OWN_TENT",
-        unitId: null,
-        slug: null,
-        name: pickTranslation(names, input.lang) ?? "Camping",
-        quantity: tents,
-        pricingType: "PER_ADULT_NIGHT",
-        nightly,
+        const rules = await this.pricing.activeRules("CAMPING", nights[0]!, lastNight);
+        const nightly = nights.map((date) => ({ date, priceSatang: nightPrice(rules, date, camping!.price_per_adult_night_satang) }));
+        const names = Object.fromEntries((await this.inventory.campingTranslations()).map((t) => [t.language_code, t.name]));
+
+        // Tarp area: one per booking, a fixed price per night, its own nightly limit.
+        let tarp: TarpLineDto | null = null;
+        if (stay.tarp) {
+          if (camping.tarp_enabled !== 1) throw new ConflictError("The tarp area option is not offered", "TARP_UNAVAILABLE");
+          const areas = await this.availability.tarpNights(nights);
+          if (areas.some((n) => n.remaining < 1)) throw new ConflictError("No tarp area left for these nights", "TARP_FULL");
+          tarp = {
+            quantity: 1,
+            pricePerNightSatang: camping.tarp_price_per_night_satang,
+            nights: nights.length,
+            subtotalSatang: camping.tarp_price_per_night_satang * nights.length,
+          };
+        }
         // Per adult per night; children under the free age stay free (spec §14).
-        subtotalSatang: sum(nightly) * input.adults,
-      };
-
-      // Tarp area: one per booking, a fixed price per night, its own nightly limit.
-      if (input.stay.tarp) {
-        if (camping.tarp_enabled !== 1) throw new ConflictError("The tarp area option is not offered", "TARP_UNAVAILABLE");
-        const areas = await this.availability.tarpNights(nights);
-        if (areas.some((n) => n.remaining < 1)) throw new ConflictError("No tarp area left for these nights", "TARP_FULL");
-        tarp = {
-          quantity: 1,
-          pricePerNightSatang: camping.tarp_price_per_night_satang,
-          nights: nights.length,
-          subtotalSatang: camping.tarp_price_per_night_satang * nights.length,
-        };
+        const subtotalSatang = sum(nightly) * stay.adults;
+        stays.push({
+          item: {
+            type: "OWN_TENT",
+            unitId: null,
+            slug: null,
+            name: pickTranslation(names, input.lang) ?? "Camping",
+            quantity: tents,
+            pricingType: "PER_ADULT_NIGHT",
+            nightly,
+            subtotalSatang,
+            adults: stay.adults,
+            children: stay.children,
+            // The tarp area is part of the camping stay (and of its deposit).
+            payLaterSatang: payLaterOf(camping.payment_mode ?? "FULL", subtotalSatang + (tarp?.subtotalSatang ?? 0)),
+          },
+          unit: null,
+          tents,
+          tarp,
+          included: [],
+        });
       }
     }
 
     const menu = await this.menu(input.lang);
-    const target = unit ? { unitId: unit.id, unitType: unit.unit_type } : ("CAMPING" as const);
-    const included = this.includedMeals(await this.pricing.includedMeals(target), menu, nights, input);
+    const includedLines: PreparedFoodLine[] = [];
+    for (const [i, stay] of stays.entries()) {
+      const target = stay.unit ? { unitId: stay.unit.id, unitType: stay.unit.unit_type } : ("CAMPING" as const);
+      const included = this.includedMeals(await this.pricing.includedMeals(target), menu, nights, stay.item, several ? stay.item.name : null);
+      stay.included = included.meals;
+      includedLines.push(...included.lines.map((l) => ({ ...l, stayIndex: i })));
+    }
     const extra = await this.extraFood(input, nights, menu);
 
-    const foodLines = [...included.lines, ...extra];
-    const accommodationSubtotalSatang = item.subtotalSatang + (tarp?.subtotalSatang ?? 0);
+    const foodLines = [...includedLines, ...extra];
+    const tarp = stays.find((st) => st.tarp)?.tarp ?? null;
+    const accommodationSubtotalSatang = stays.reduce((acc, st) => acc + st.item.subtotalSatang + (st.tarp?.subtotalSatang ?? 0), 0);
     const foodSubtotalSatang = foodLines.reduce((acc, l) => acc + l.dto.subtotalSatang, 0);
     const totalSatang = accommodationSubtotalSatang + foodSubtotalSatang;
-    // Deposit plan of this house / tent / camping (migration 0025): half of the stay now, the rest before check-in.
-    const mode = (unit ? unit.payment_mode : camping?.payment_mode) ?? "FULL";
+    const items = stays.map((st) => st.item);
     return {
       quote: {
         checkIn: input.checkIn,
@@ -237,23 +305,23 @@ export class QuoteService {
         nights: nights.length,
         adults: input.adults,
         children: input.children,
-        item,
+        items,
+        item: items[0]!,
         tarp,
-        includedMeals: included.meals.map((m) => m.dto),
+        includedMeals: stays.flatMap((st) => st.included.map((m) => m.dto)),
         food: foodLines.map((l) => l.dto),
         accommodationSubtotalSatang,
         foodSubtotalSatang,
         discountSatang: 0,
         totalSatang,
         currency: "THB",
-        depositSatang: depositDue(mode, accommodationSubtotalSatang, totalSatang),
+        // Deposit plan (migration 0025), per stay: what each DEPOSIT_50 stay leaves for check-in; food is paid now.
+        depositSatang: depositFor(totalSatang, items.reduce((acc, it) => acc + it.payLaterSatang, 0)),
       },
       nights,
-      unit,
+      stays,
       camping,
-      tents,
       tarp,
-      included: included.meals,
       foodLines,
       settings,
     };
@@ -341,7 +409,8 @@ export class QuoteService {
    * Included meals: one zero-priced line per service date, adults first.
    * They never consume kitchen capacity or order deadlines — they come with the room.
    */
-  private includedMeals(rows: IncludedMealRow[], menu: Awaited<ReturnType<QuoteService["menu"]>>, nights: string[], input: QuoteInput) {
+  private includedMeals(rows: IncludedMealRow[], menu: Awaited<ReturnType<QuoteService["menu"]>>, nights: string[],
+    input: { adults: number; children: number }, stayName: string | null) {
     const meals: PreparedIncludedMeal[] = [];
     const lines: PreparedFoodLine[] = [];
     const guests = input.adults + input.children;
@@ -360,6 +429,7 @@ export class QuoteService {
           name: (option ? menu.optionName(option.id) : undefined) ?? menu.categoryName(category.id) ?? category.code,
           personsPerNight: persons,
           nights: nights.length,
+          ...(stayName ? { stayName } : {}),
         },
       });
       if (!option) continue;

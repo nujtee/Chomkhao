@@ -25,14 +25,25 @@ export function BookingSummary({ quote, headingLevel = 2 }: { quote: QuoteDto; h
   const baht = (s: number) => formatBaht(s, locale.code);
   const H = `h${headingLevel}` as "h2" | "h3";
   const extra = quote.food.filter((f) => f.includedQuantity === 0);
+  // Several stays (houses / VIP tents / camping, same dates); a booking also lists a stay staff cancelled alone.
+  const stays = quote.items?.length ? quote.items : [quote.item];
+  const live = stays.filter((x) => x.status !== "CANCELLED");
+  const cancelled = stays.filter((x) => x.status === "CANCELLED");
+  const several = live.length > 1;
+  const adultsOf = (x: (typeof stays)[number]) => x.adults ?? quote.adults;
 
   return (
     <section className="summary" aria-labelledby="summary-h">
       <H id="summary-h" className="summary__title">{bt.summary}</H>
       <p className="summary__item">
-        <strong>{quote.item.name}</strong>
-        {quote.item.type === "OWN_TENT" && <> · {fill(bt.tentsLine, { n: quote.item.quantity })}</>}
-        {quote.tarp && <> + {bt.tarpLine}</>}
+        {live.map((x, i) => (
+          <span key={x.id ?? `${x.type}|${x.unitId ?? i}`}>
+            {i > 0 && " + "}
+            <strong>{x.name}</strong>
+            {x.type === "OWN_TENT" && <> · {fill(bt.tentsLine, { n: x.quantity })}</>}
+            {x.type === "OWN_TENT" && quote.tarp && <> + {bt.tarpLine}</>}
+          </span>
+        ))}
       </p>
       <p className="summary__meta">
         {fill(bt.stayLine, { checkIn: dateText(quote.checkIn), checkOut: dateText(quote.checkOut), n: quote.nights })}
@@ -41,26 +52,46 @@ export function BookingSummary({ quote, headingLevel = 2 }: { quote: QuoteDto; h
       </p>
 
       <dl className="summary__lines">
-        {quote.item.nightly.map((n) => (
-          <div key={n.date} className="summary__line summary__line--sub">
-            <dt>{dateText(n.date)}{quote.item.pricingType === "PER_ADULT_NIGHT" && ` × ${quote.adults}`}</dt>
-            <dd>{baht(quote.item.pricingType === "PER_ADULT_NIGHT" ? n.priceSatang * quote.adults : n.priceSatang)}</dd>
+        {live.flatMap((x, i) => {
+          const k = x.id ?? `${x.type}|${x.unitId ?? i}`;
+          return [
+            several && (
+              <div key={`${k}|stay`} className="summary__line summary__line--stay">
+                <dt>
+                  {x.name}
+                  <small>{fill(bt.guestsLine, { adults: x.adults, children: x.children })}</small>
+                </dt>
+                <dd>{baht(x.subtotalSatang + (x.type === "OWN_TENT" && quote.tarp ? quote.tarp.subtotalSatang : 0))}</dd>
+              </div>
+            ),
+            ...x.nightly.map((n) => (
+              <div key={`${k}|${n.date}`} className="summary__line summary__line--sub">
+                <dt>{dateText(n.date)}{x.pricingType === "PER_ADULT_NIGHT" && ` × ${adultsOf(x)}`}</dt>
+                <dd>{baht(x.pricingType === "PER_ADULT_NIGHT" ? n.priceSatang * adultsOf(x) : n.priceSatang)}</dd>
+              </div>
+            )),
+            x.type === "OWN_TENT" && quote.tarp && (
+              <div key={`${k}|tarp`} className="summary__line summary__line--sub">
+                <dt>{fill(bt.tarpNights, { n: quote.tarp.nights })}</dt>
+                <dd>{baht(quote.tarp.subtotalSatang)}</dd>
+              </div>
+            ),
+          ];
+        })}
+        {cancelled.map((x, i) => (
+          <div key={x.id ?? i} className="summary__line summary__line--cancelled">
+            <dt>{x.name}</dt>
+            <dd>{bt.stayCancelled}</dd>
           </div>
         ))}
-        {quote.tarp && (
-          <div className="summary__line summary__line--sub">
-            <dt>{fill(bt.tarpNights, { n: quote.tarp.nights })}</dt>
-            <dd>{baht(quote.tarp.subtotalSatang)}</dd>
-          </div>
-        )}
         <div className="summary__line">
           <dt>{bt.accommodation}</dt>
           <dd>{baht(quote.accommodationSubtotalSatang)}</dd>
         </div>
 
-        {quote.includedMeals.map((m) => (
-          <div key={m.categoryCode} className="summary__line summary__line--sub">
-            <dt>{fill(bt.includedLine, { name: m.name, n: m.personsPerNight, nights: m.nights })}</dt>
+        {quote.includedMeals.map((m, i) => (
+          <div key={`${m.categoryCode}|${i}`} className="summary__line summary__line--sub">
+            <dt>{fill(bt.includedLine, { name: m.name, n: m.personsPerNight, nights: m.nights })}{m.stayName && ` · ${m.stayName}`}</dt>
             <dd>{bt.included}</dd>
           </div>
         ))}

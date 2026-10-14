@@ -26,6 +26,8 @@ export interface MsgBooking {
   itemType: "HOUSE" | "VIP_TENT" | "OWN_TENT";
   itemName: string;
   tents: number;
+  /** Every stay of the booking, in the order chosen (several houses / VIP tents / camping). */
+  stays?: { type: "HOUSE" | "VIP_TENT" | "OWN_TENT"; name: string; quantity: number }[];
   /** Tarp areas booked with the tents (camping add-on). */
   tarps?: number;
   adults: number;
@@ -391,6 +393,15 @@ export class LineFormatter {
   }
 
   stayLine(b: MsgBooking): string {
+    // Several stays: the houses / VIP tents on one line, the camping tents on the next.
+    if (b.stays && b.stays.length > 1) {
+      const units = b.stays.filter((s) => s.type !== "OWN_TENT").map((s) => s.name);
+      const camp = b.stays.find((s) => s.type === "OWN_TENT");
+      return [
+        ...(units.length ? [`${this.t.houseVip}: ${units.join(", ")}`] : []),
+        ...(camp ? [`${this.t.camping}: ${fill(this.t.tents, { n: camp.quantity })}${b.tarps ? ` + ${this.t.tarp}` : ""}`] : []),
+      ].join("\n");
+    }
     return b.itemType === "OWN_TENT"
       ? `${this.t.camping}: ${fill(this.t.tents, { n: b.tents })}${b.tarps ? ` + ${this.t.tarp}` : ""}`
       : `${this.t.houseVip}: ${b.itemName}`;

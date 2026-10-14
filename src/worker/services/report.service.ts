@@ -1,3 +1,4 @@
+import { parseStays, type StayBriefRow } from "../repositories/stay-sql.ts";
 import type { NightPriceDto } from "../../shared/booking-types.ts";
 import { addDays, diffDays, isIsoDate, stayNights, todayIn, utcOffsetMinutes, DEFAULT_TIMEZONE } from "../../shared/dates.ts";
 import {
@@ -74,6 +75,27 @@ export function allocateNights(stay: Pick<StayRow, "check_in" | "check_out" | "n
   return out;
 }
 
+/**
+ * One stay's accommodation money after any booking discount (shared by stay price): a booking may hold several
+ * stays (migration 0026), each reported on its own nights.
+ */
+export function stayNet(s: Pick<StayRow, "stay_subtotal_satang" | "accommodation_subtotal_satang" | "discount_satang">): number {
+  const discount = Math.min(s.discount_satang, s.accommodation_subtotal_satang);
+  const share = s.accommodation_subtotal_satang > 0 ? Math.round((discount * s.stay_subtotal_satang) / s.accommodation_subtotal_satang) : 0;
+  return Math.max(0, s.stay_subtotal_satang - share);
+}
+
+/** Splits `amount` over parts in proportion to their weights (the last part takes the rounding). */
+function splitBy(amount: number, weights: number[]): number[] {
+  const sum = weights.reduce((a, w) => a + w, 0);
+  let used = 0;
+  return weights.map((w, i) => {
+    const part = i === weights.length - 1 ? amount - used : sum > 0 ? Math.floor((amount * w) / sum) : 0;
+    used += part;
+    return part;
+  });
+}
+
 /** Reports (spec §50). Every figure from D1; money as integer satang. */
 export class ReportService {
   constructor(
@@ -143,7 +165,7 @@ export class ReportService {
     const byType = new Map<string, Row>();
     for (const s of stays) {
       if (!PAID.has(s.payment_status)) continue;
-      const net = Math.max(0, s.accommodation_subtotal_satang - Math.min(s.discount_satang, s.accommodation_subtotal_satang));
+      const net = stayNet(s);
       for (const [date, amount] of allocateNights(s, net)) {
         if (date < c.from || date > c.to) continue;
         const nights: Record<string, number> = s.item_type === "OWN_TENT" ? { tentNights: s.quantity } : { unitNights: 1 };
@@ -192,12 +214,18 @@ export class ReportService {
         created: 1, [bucket]: 1, nights: live ? b.nights : 0, guests: live ? b.adults + b.children : 0, value: live ? b.total_satang : 0,
       });
       add(byStatus, b.booking_status, { count: 1, value: b.total_satang });
-      const itemKey = `${b.item_type}|${b.item_name}`;
-      const item = byItem.get(itemKey) ?? { item: b.item_name, type: b.item_type };
-      byItem.set(itemKey, item);
-      for (const [k, v] of Object.entries({ count: 1, nights: live ? b.nights : 0, value: live ? b.total_satang : 0 })) {
-        item[k] = ((item[k] as number | undefined) ?? 0) + v;
-      }
+      // By accommodation: each stay of the booking, its value the booking's share by stay price.
+      const stays = parseStays(b.stays_json);
+      const list = stays.length ? stays : [{ type: b.item_type as StayBriefRow["type"], name: b.item_name, quantity: 1, subtotal: 1 }];
+      const values = splitBy(live ? b.total_satang : 0, list.map((x) => x.subtotal ?? 1));
+      list.forEach((x, i) => {
+        const itemKey = `${x.type}|${x.name}`;
+        const item = byItem.get(itemKey) ?? { item: x.name, type: x.type };
+        byItem.set(itemKey, item);
+        for (const [k, v] of Object.entries({ count: 1, nights: live ? b.nights : 0, value: values[i]! })) {
+          item[k] = ((item[k] as number | undefined) ?? 0) + v;
+        }
+      });
     }
     const statusColumns = [col("status", "code"), col("count", "int"), col("value", "money")];
     const statusRows = ["PENDING", "CONFIRMED", "CHECKED_IN", "CHECKED_OUT", "NO_SHOW", "CANCELLED", "EXPIRED"]
@@ -248,7 +276,7 @@ export class ReportService {
     }
     for (const s of stays) {
       if (s.item_type === "OWN_TENT" || !s.unit_id) continue;
-      const net = PAID.has(s.payment_status) ? Math.max(0, s.accommodation_subtotal_satang - Math.min(s.discount_satang, s.accommodation_subtotal_satang)) : 0;
+      const net = PAID.has(s.payment_status) ? stayNet(s) : 0;
       for (const [date, amount] of allocateNights(s, net)) {
         if (date < c.from || date > c.to) continue;
         const u = perUnit.get(s.unit_id) ?? { sold: 0, revenue: 0, blocked: 0 };
@@ -299,7 +327,7 @@ export class ReportService {
     }
     for (const s of stays) {
       if (s.item_type !== "OWN_TENT") continue;
-      const net = PAID.has(s.payment_status) ? Math.max(0, s.accommodation_subtotal_satang - Math.min(s.discount_satang, s.accommodation_subtotal_satang)) : 0;
+      const net = PAID.has(s.payment_status) ? stayNet(s) : 0;
       for (const [date, amount] of allocateNights(s, net)) {
         if (date < c.from || date > c.to) continue;
         add(byPeriod, periodKey(date, c.group), {

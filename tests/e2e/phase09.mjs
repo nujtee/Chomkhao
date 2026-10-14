@@ -538,7 +538,8 @@ await check("camping: owner offers a tarp area; a guest books dates, 2 adults + 
   // Admin: list and detail show the tarp area.
   await pa.goto(`${BASE}/en/admin/bookings/${code}`);
   await pa.getByText("Tarp area × 2 nights").waitFor();
-  await pa.getByText(/1 tents \+ tarp area/).waitFor();
+  await pa.getByRole("definition").filter({ hasText: /1 tents \+ tarp area/ }).waitFor();
+  await pa.getByRole("heading", { name: /1 tents \+ tarp area/ }).waitFor();
 });
 
 // ---------------------------------------------------------------- permissions

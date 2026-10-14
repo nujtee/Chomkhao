@@ -17,15 +17,15 @@ export function campingItem(camping: Pick<PublicCampingDto, "name" | "pricePerAd
   return { id: "camping", name: camping?.name ?? fallbackName, category: "CAMPING", price: baht(camping?.pricePerAdultNightSatang ?? 0), quantity: tents };
 }
 
-/** Stay + paid food lines of a price quote. */
+/** Stays + paid food lines of a price quote (several stays: one item each). */
 export function quoteItems(q: QuoteDto): TrackItem[] {
-  const stay: TrackItem = {
-    id: q.item.type === "OWN_TENT" ? "camping" : q.item.slug ?? q.item.type,
-    name: q.item.name,
-    category: q.item.type === "OWN_TENT" ? "CAMPING" : q.item.type,
-    price: baht(q.item.subtotalSatang / Math.max(1, q.item.quantity)),
-    quantity: q.item.quantity,
-  };
+  const stays = (q.items?.length ? q.items : [q.item]).filter((x) => x.status !== "CANCELLED").map((x): TrackItem => ({
+    id: x.type === "OWN_TENT" ? "camping" : x.slug ?? x.type,
+    name: x.name,
+    category: x.type === "OWN_TENT" ? "CAMPING" : x.type,
+    price: baht(x.subtotalSatang / Math.max(1, x.quantity)),
+    quantity: x.quantity,
+  }));
   const food = q.food.filter((f) => f.subtotalSatang > 0).map((f): TrackItem => ({
     id: f.optionId, name: f.name, category: "FOOD", price: baht(f.unitPriceSatang), quantity: Math.max(1, f.quantity || f.adults + f.children),
   }));
@@ -33,7 +33,7 @@ export function quoteItems(q: QuoteDto): TrackItem[] {
   const tarp: TrackItem[] = q.tarp
     ? [{ id: "camping_tarp", name: "Tarp area", category: "CAMPING", price: baht(q.tarp.subtotalSatang / q.tarp.quantity), quantity: q.tarp.quantity }]
     : [];
-  return [stay, ...tarp, ...food];
+  return [...stays, ...tarp, ...food];
 }
 
 const count = (v: FoodCart[string] | undefined) => (v ? Math.max(v.quantity, v.adults + v.children) : 0);

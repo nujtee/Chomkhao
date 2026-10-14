@@ -6,7 +6,7 @@ import { Link } from "../../router/Router.tsx";
 import { useAdmin } from "../AdminContext.tsx";
 import { Alert, Button } from "../ui.tsx";
 import { useCursorList } from "../useCursorList.ts";
-import { BookingStatusBadge, useStayDate } from "./shared.tsx";
+import { BookingStatusBadge, staysText, useStayDate } from "./shared.tsx";
 import { StayButtons } from "./StayButtons.tsx";
 
 const PAYMENTS: PaymentStatus[] = ["UNPAID", "PENDING_VERIFICATION", "VERIFIED", "PAID", "REJECTED", "REFUNDED"];
@@ -112,8 +112,9 @@ export function BookingsPage() {
                   <div className="adm-muted">{format(t.bk.nights, { n: b.nights })} · {format(t.bk.guests, { adults: b.adults, children: b.children })}</div>
                 </td>
                 <td className="adm-small">
-                  {b.itemName}
-                  {b.itemType === "OWN_TENT" && <div className="adm-muted">{format(t.bk.tents, { n: b.quantity })}{b.tarps > 0 && ` + ${t.bk.tarp}`}</div>}
+                  {b.stays.length > 1 ? staysText(b.stays, (n) => format(t.bk.tents, { n })) : b.itemName}
+                  {b.stays.length <= 1 && b.itemType === "OWN_TENT" && <div className="adm-muted">{format(t.bk.tents, { n: b.quantity })}{b.tarps > 0 && ` + ${t.bk.tarp}`}</div>}
+                  {b.stays.length > 1 && b.tarps > 0 && <div className="adm-muted">+ {t.bk.tarp}</div>}
                 </td>
                 <td className="adm-num">
                   {formatBaht(b.totalSatang, locale.code)}

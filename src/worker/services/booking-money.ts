@@ -11,6 +11,8 @@ export function dueOnline(row: Pick<BookingRow, "deposit_satang" | "total_satang
 }
 
 /** Money received: verified / paid payments. */
-export function paidOf(payments: { status: string; amount_satang: number }[]): number {
-  return payments.filter((p) => p.status === "VERIFIED" || p.status === "PAID").reduce((acc, p) => acc + p.amount_satang, 0);
+export function paidOf(payments: { status: string; amount_satang: number; refund_amount_satang?: number | null }[]): number {
+  // What is left of a partly refunded payment counts too (a cancelled stay refunded, the rest kept): see netPayment().
+  return payments.reduce((acc, p) => acc + (p.status === "VERIFIED" || p.status === "PAID" ? p.amount_satang
+    : p.status === "REFUNDED" ? p.amount_satang - (p.refund_amount_satang ?? p.amount_satang) : 0), 0);
 }

@@ -81,7 +81,7 @@ describe("migrations", () => {
    * may only DROP a table it re-creates from `<table>__new` with every row copied, and must re-create
    * every trigger it drops.
    */
-  const ANNOUNCED_REBUILDS = ["0022_d1_glob_limits.sql"];
+  const ANNOUNCED_REBUILDS = ["0022_d1_glob_limits.sql", "0026_multi_stay.sql"];
 
   it("announced rebuilds only replace tables (copy every row, rename back) and restore dropped triggers", () => {
     for (const file of ANNOUNCED_REBUILDS) {

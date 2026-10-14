@@ -1,6 +1,6 @@
 /** Admin dashboard (spec §48) and booking calendar (spec §49) API contract. */
 import type { StayActionsDto } from "./stay.ts";
-import type { BookingStatus, PaymentStatus } from "./booking-types.ts";
+import type { BookingStatus, BookingStayBriefDto, PaymentStatus } from "./booking-types.ts";
 import type { LocaleCode } from "./i18n/locales.ts";
 
 export type ItemType = "HOUSE" | "VIP_TENT" | "OWN_TENT";
@@ -9,8 +9,10 @@ export interface StayRowDto {
   bookingCode: string;
   customerName: string;
   itemType: ItemType;
+  /** Every stay's name ("House 01 + VIP-02"); `stays` has them one by one. */
   itemName: string;
   quantity: number;
+  stays: BookingStayBriefDto[];
   /** Tarp areas booked with own-tent camping (0 = none). */
   tarps: number;
   adults: number;
@@ -117,6 +119,8 @@ export interface CalendarBookingDto {
   unitId: string | null;
   itemName: string;
   quantity: number;
+  /** Every stay of the booking (several houses / tents / camping). */
+  stays: BookingStayBriefDto[];
   tarps: number;
   adults: number;
   children: number;

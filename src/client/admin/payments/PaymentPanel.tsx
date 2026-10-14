@@ -83,7 +83,9 @@ export function PaymentPanel({ booking, notice = null, onChanged }: {
       setBusy(false);
     }
   }
-  const refundable = booking.status === "CANCELLED" || booking.status === "NO_SHOW";
+  // A booking still on can have what was paid beyond its total refunded (a stay cancelled after payment).
+  const overpaid = booking.overpaidSatang ?? 0;
+  const refundable = booking.status === "CANCELLED" || booking.status === "NO_SHOW" || overpaid > 0;
 
   async function doRecord() {
     setConfirm(null);
@@ -160,6 +162,10 @@ export function PaymentPanel({ booking, notice = null, onChanged }: {
         </dl>
       )}
 
+      {overpaid > 0 && (
+        <Alert kind="info">{format(t.pay.overpaid, { amount: baht(overpaid) })}{can("payments.refund") ? ` ${t.pay.overpaidRefund}` : ""}</Alert>
+      )}
+
       <h3 className="adm-h3">{t.pay.payments}</h3>
       {booking.payments.length === 0 ? <p className="adm-muted">{t.pay.noPayments}</p> : (
         <div className="adm-tablewrap">
@@ -198,7 +204,10 @@ export function PaymentPanel({ booking, notice = null, onChanged }: {
                   {refundable && can("payments.refund") && (
                     <td>
                       {(p.status === "PAID" || p.status === "VERIFIED") && (
-                        <Button variant="secondary" onClick={() => setRefund({ paymentId: p.id, amount: String(p.amountSatang / SATANG_PER_BAHT), reason: "" })}>
+                        <Button variant="secondary" onClick={() => setRefund({
+                          paymentId: p.id, reason: "",
+                          amount: String((overpaid > 0 ? Math.min(overpaid, p.amountSatang) : p.amountSatang) / SATANG_PER_BAHT),
+                        })}>
                           {t.pay.refund}
                         </Button>
                       )}

@@ -55,12 +55,15 @@ describe("camping booking form", () => {
 });
 
 describe("booking summary with a tarp area", () => {
+  const stay: QuoteDto["item"] = {
+    type: "OWN_TENT", unitId: null, slug: null, name: "นำเต็นท์มาเอง", quantity: 2, pricingType: "PER_ADULT_NIGHT",
+    nightly: [{ date: "2027-02-01", priceSatang: 25000 }, { date: "2027-02-02", priceSatang: 25000 }], subtotalSatang: 100000,
+    adults: 2, children: 1, payLaterSatang: 0,
+  };
   const quote: QuoteDto = {
     checkIn: "2027-02-01", checkOut: "2027-02-03", nights: 2, adults: 2, children: 1,
-    item: {
-      type: "OWN_TENT", unitId: null, slug: null, name: "นำเต็นท์มาเอง", quantity: 2, pricingType: "PER_ADULT_NIGHT",
-      nightly: [{ date: "2027-02-01", priceSatang: 25000 }, { date: "2027-02-02", priceSatang: 25000 }], subtotalSatang: 100000,
-    },
+    item: stay,
+    items: [stay],
     tarp: { quantity: 1, pricePerNightSatang: 15000, nights: 2, subtotalSatang: 30000 },
     includedMeals: [], food: [], accommodationSubtotalSatang: 130000, foodSubtotalSatang: 0, discountSatang: 0, totalSatang: 130000, currency: "THB",
     depositSatang: null,

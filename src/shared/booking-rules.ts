@@ -41,8 +41,17 @@ export type PaymentMode = (typeof PAYMENT_MODES)[number];
  * paid in full now. null = nothing would be left for later (pay the full total).
  */
 export function depositDue(mode: PaymentMode, accommodationSubtotalSatang: number, totalSatang: number): number | null {
-  if (mode !== "DEPOSIT_50") return null;
-  const later = Math.min(Math.floor(accommodationSubtotalSatang / 2 / SATANG_PER_BAHT) * SATANG_PER_BAHT, totalSatang);
+  return depositFor(totalSatang, payLaterOf(mode, accommodationSubtotalSatang));
+}
+
+/** The part of one stay (accommodation + its tarp area) left for check-in: half of a DEPOSIT_50 stay, whole baht down. */
+export function payLaterOf(mode: PaymentMode, staySubtotalSatang: number): number {
+  return mode === "DEPOSIT_50" ? Math.floor(staySubtotalSatang / 2 / SATANG_PER_BAHT) * SATANG_PER_BAHT : 0;
+}
+
+/** Amount asked online for a booking whose stays leave `laterSatang` for check-in; null = pay the full total now. */
+export function depositFor(totalSatang: number, laterSatang: number): number | null {
+  const later = Math.min(laterSatang, totalSatang);
   const now = totalSatang - later;
   return later > 0 && now > 0 ? now : null;
 }

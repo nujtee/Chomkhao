@@ -3141,3 +3141,44 @@
   margin: 0;
   padding-left: 18px;
 }
+
+/* ---------- Stays of a booking (several houses / VIP tents / camping in one booking) ---------- */
+.adm-stay {
+  padding: 14px 0;
+  border-top: 1px solid var(--color-border);
+}
+
+.adm-stay:first-of-type {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.adm-stay__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  margin-bottom: 8px;
+}
+
+.adm-stay__name {
+  margin: 0;
+}
+
+.adm-stay__cancel {
+  margin-left: auto;
+}
+
+.adm-stay.is-cancelled .adm-stay__name {
+  text-decoration: line-through;
+  color: var(--color-muted);
+}
+
+.adm-stay.is-cancelled .adm-tablewrap {
+  opacity: 0.6;
+}
+
+.adm-stay__total {
+  margin: 12px 0 0;
+  text-align: right;
+}

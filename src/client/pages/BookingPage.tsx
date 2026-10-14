@@ -27,11 +27,11 @@ import { Confirmation } from "../booking/Confirmation.tsx";
 import { FoodStep } from "../booking/FoodStep.tsx";
 import { BookingSummary, useDateText } from "../booking/Summary.tsx";
 import { CampingBooker } from "../booking/CampingBooker.tsx";
+import { guestsForNewUnit, pickKey, pickProblem, PicksBar, StayPicks, type Pick } from "../booking/StayPicks.tsx";
 import { useBookingT } from "../booking/useBookingT.ts";
 import { IMAGE_SIZES } from "../../shared/media-types.ts";
 import { ResponsiveImage } from "../content/ResponsiveImage.tsx";
 
-type Choice = { kind: "UNIT"; unit: PublicUnitDto } | { kind: "CAMPING"; tents: number; tarp: boolean };
 type Step = "choose" | "food" | "details" | "review" | "done";
 const WIZARD: Step[] = ["food", "details", "review"];
 
@@ -80,7 +80,8 @@ export function BookingPage() {
   const [searchError, setSearchError] = useState<string | null>(null);
 
   const [step, setStep] = useState<Step>("choose");
-  const [choice, setChoice] = useState<Choice | null>(null);
+  /** The stays picked (several houses / VIP tents + camping, same dates), each with its own guests. */
+  const [picks, setPicks] = useState<Pick[]>([]);
   const [catalogue, setCatalogue] = useState<FoodCatalogueDto | null>(null);
   const [cart, setCart] = useState<FoodCart>({});
   const [quote, setQuote] = useState<QuoteDto | null>(null);
@@ -115,7 +116,7 @@ export function BookingPage() {
   /** Camping form: spots left on its dates, without touching the search results above. */
   const peek = useCallback((q: StayQuery) => fetchAvailability(q, t), [t]);
 
-  // Deep link: run the search once, then pre-select the unit if it is free.
+  // Deep link: run the search once, then go on with the unit if it is free and takes the guests (more can be added later).
   const autoRan = useRef(false);
   useEffect(() => {
     if (autoRan.current || !data || !initial.unitSlug) return;
@@ -123,46 +124,60 @@ export function BookingPage() {
     void search(initial.query).then(({ data: a }) => {
       const unit = [...data.houses, ...data.vipTents].find((u) => u.slug === initial.unitSlug);
       const state = a?.units.find((u) => u.unitId === unit?.id);
-      if (unit && state?.available && state.fitsGuests) choose({ kind: "UNIT", unit }, initial.query);
+      if (!unit || !state?.available) return;
+      track({ name: "select_accommodation", item: unitItem(unit) });
+      if (state.fitsGuests) start([{ kind: "UNIT", unit, adults: initial.query.adults, children: initial.query.children }], initial.query);
+      else setPicks([{ kind: "UNIT", unit, ...guestsForNewUnit(unit, initial.query, []) }]);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data]);
 
-  const request = useCallback((q: StayQuery, c: Choice, foodCart: FoodCart): QuoteRequest => ({
+  const request = useCallback((q: StayQuery, chosen: Pick[], foodCart: FoodCart): QuoteRequest => ({
     checkIn: q.checkIn,
     checkOut: q.checkOut,
-    adults: q.adults,
-    children: q.children,
-    stay: c.kind === "UNIT" ? { kind: "UNIT", unitId: c.unit.id } : { kind: "CAMPING", tents: c.tents, ...(c.tarp ? { tarp: true } : {}) },
+    adults: chosen.reduce((acc, p) => acc + p.adults, 0),
+    children: chosen.reduce((acc, p) => acc + p.children, 0),
+    // Every stay with its own guests, on the same dates.
+    stays: chosen.map((p) => (p.kind === "UNIT"
+      ? { kind: "UNIT", unitId: p.unit.id, adults: p.adults, children: p.children }
+      : { kind: "CAMPING", tents: p.tents, ...(p.tarp ? { tarp: true } : {}), adults: p.adults, children: p.children })),
     food: cartToSelections(foodCart, (id) => catalogue?.categories.some((cat) => cat.options.some((o) => o.id === id && o.pricingType === "PER_PERSON")) ?? false),
     lang: locale.code,
   }), [catalogue, locale.code]);
 
   // Live server-side price whenever the selection changes (debounced).
   useEffect(() => {
-    if (!choice || !searched || step === "choose" || step === "done") return;
+    if (!picks.length || !searched || step === "choose" || step === "done") return;
     const controller = new AbortController();
     const timer = setTimeout(() => {
       setQuoting(true);
-      fetchQuote(request(searched, choice, cart), controller.signal)
+      fetchQuote(request(searched, picks, cart), controller.signal)
         .then((q) => { setQuote(q); setNotice(null); })
         .catch((err: unknown) => { if (!controller.signal.aborted) setNotice(bookingErrorText(bt, err)); })
         .finally(() => { if (!controller.signal.aborted) setQuoting(false); });
     }, 250);
     return () => { controller.abort(); clearTimeout(timer); };
-  }, [choice, searched, cart, step, request, bt]);
+  }, [picks, searched, cart, step, request, bt]);
 
   useEffect(() => {
     if (step !== "choose") headingRef.current?.focus();
   }, [step]);
 
-  function choose(c: Choice, q: StayQuery = searched ?? query) {
+  const trackItem = (p: Pick) => (p.kind === "UNIT" ? unitItem(p.unit) : campingItem(data?.camping ?? null, t.accommodation.camping, p.tents));
+
+  /** Add a house / VIP tent to the stays (guests: whoever the search asked for and no other stay holds yet). */
+  function addUnit(unit: PublicUnitDto) {
+    track({ name: "select_accommodation", item: unitItem(unit) });
+    setPicks((cur) => [...cur.filter((p) => pickKey(p) !== unit.id), { kind: "UNIT", unit, ...guestsForNewUnit(unit, searched ?? query, cur) }]);
+  }
+
+  /** Start the booking steps with these stays. */
+  function start(chosen: Pick[], q: StayQuery = searched ?? query) {
     sent.current = { viewFood: false, begin: false };
-    const item = c.kind === "UNIT" ? unitItem(c.unit) : campingItem(data?.camping ?? null, t.accommodation.camping, c.tents);
-    track({ name: "select_accommodation", item });
+    const items = chosen.map(trackItem);
     // Indicative value (one night); the exact total is known at checkout.
-    track({ name: "begin_booking", value: (item.price ?? 0) * (c.kind === "UNIT" ? 1 : q.adults), items: [item] });
-    setChoice(c);
+    track({ name: "begin_booking", value: chosen.reduce((acc, p, i) => acc + (items[i]!.price ?? 0) * (p.kind === "UNIT" ? 1 : p.adults), 0), items });
+    setPicks(chosen);
     setCart({});
     setQuote(null);
     setCatalogue(null);
@@ -191,7 +206,7 @@ export function BookingPage() {
   }
 
   async function confirm() {
-    if (!choice || !searched || !quote || !idemKey) return;
+    if (!picks.length || !searched || !quote || !idemKey) return;
     if (!privacy) {
       setFieldErrors({ privacyAccepted: bt.errors.MUST_ACCEPT });
       return;
@@ -200,7 +215,7 @@ export function BookingPage() {
     setNotice(null);
     try {
       const created = await createBooking({
-        ...request(searched, choice, cart),
+        ...request(searched, picks, cart),
         customer: {
           name: details.name,
           phone: details.phone,
@@ -221,11 +236,14 @@ export function BookingPage() {
       const text = bookingErrorText(bt, err);
       if (err instanceof ApiError && err.code === "PRICE_CHANGED") {
         setNotice(bt.priceChanged);
-        setQuote(await fetchQuote(request(searched, choice, cart)).catch(() => quote));
+        setQuote(await fetchQuote(request(searched, picks, cart)).catch(() => quote));
         setIdemKey(newIdempotencyKey());
       } else if (err instanceof ApiError && ["UNIT_UNAVAILABLE", "CAMPING_FULL", "ACCOMMODATION_NOT_FOUND", "CAMPING_UNAVAILABLE", "TARP_FULL", "TARP_UNAVAILABLE"].includes(err.code)) {
+        // Back to the stays: the one just taken goes (the others stay picked).
         setStep("choose");
-        setChoice(null);
+        const gone = err.details.unitId;
+        setPicks((cur) => (gone ? cur.filter((p) => pickKey(p) !== gone)
+          : err.code.startsWith("CAMPING") || err.code.startsWith("TARP") ? cur.filter((p) => p.kind !== "CAMPING") : []));
         void search(searched);
         setSearchError(text);
       } else if (err instanceof ApiError && Object.keys(err.details).some((k) => k.startsWith("customer."))) {
@@ -246,7 +264,7 @@ export function BookingPage() {
 
   function restart() {
     setStep("choose");
-    setChoice(null);
+    setPicks([]);
     setBooking(null);
     setQuote(null);
     setCart({});
@@ -255,9 +273,10 @@ export function BookingPage() {
     setSearched(null);
   }
 
+  // A unit too small for the whole group can still be one of several stays: free is enough here.
   const availabilityFor = (unit: PublicUnitDto): Availability => {
     const a = availability?.units.find((u) => u.unitId === unit.id);
-    return a ? { available: a.available, fitsGuests: a.fitsGuests } : null;
+    return a ? { available: a.available, fitsGuests: true } : null;
   };
 
   // ------------------------------------------------------------------ confirmation
@@ -270,10 +289,10 @@ export function BookingPage() {
   }
 
   // ------------------------------------------------------------------ wizard
-  if (step !== "choose" && choice && searched) {
+  if (step !== "choose" && picks.length && searched) {
     const index = WIZARD.indexOf(step);
     const titles: Record<string, string> = { food: bt.foodTitle, details: bt.stepDetails, review: bt.stepReview };
-    const itemName = choice.kind === "UNIT" ? choice.unit.name : data?.camping.name ?? t.accommodation.camping;
+    const campingName = data?.camping.name ?? t.accommodation.camping;
     const submitDetails = (e: FormEvent) => {
       e.preventDefault();
       setFieldErrors({});
@@ -293,15 +312,20 @@ export function BookingPage() {
 
         <section className="flow-stay" aria-label={bt.yourStay}>
           <div>
-            <strong>{itemName}</strong>
-            {choice.kind === "CAMPING" && <> · {fill(bt.tentsLine, { n: choice.tents })}{choice.tarp && ` + ${bt.tarpLine}`}</>}
+            {picks.map((p, i) => (
+              <span key={pickKey(p)} className="flow-stay__item">
+                {i > 0 && " + "}
+                <strong>{p.kind === "UNIT" ? p.unit.name : campingName}</strong>
+                {p.kind === "CAMPING" && <> · {fill(bt.tentsLine, { n: p.tents })}{p.tarp && ` + ${bt.tarpLine}`}</>}
+              </span>
+            ))}
             <div className="flow-stay__meta">
               {fill(bt.stayLine, { checkIn: dateText(searched.checkIn), checkOut: dateText(searched.checkOut), n: quote?.nights ?? "" })}
               {" · "}
-              {fill(bt.guestsLine, { adults: searched.adults, children: searched.children })}
+              {fill(bt.guestsLine, { adults: picks.reduce((a, p) => a + p.adults, 0), children: picks.reduce((a, p) => a + p.children, 0) })}
             </div>
           </div>
-          <button type="button" className="button button--ghost" onClick={() => { setStep("choose"); setChoice(null); }}>{bt.change}</button>
+          <button type="button" className="button button--ghost" onClick={() => setStep("choose")}>{bt.change}</button>
         </section>
 
         <h1 className="page__title" tabIndex={-1} ref={headingRef}>{titles[step]}</h1>
@@ -364,7 +388,7 @@ export function BookingPage() {
 
         <div className="flow-nav">
           <button type="button" className="button button--secondary"
-            onClick={() => (index === 0 ? (setStep("choose"), setChoice(null)) : go(WIZARD[index - 1]!))}>
+            onClick={() => (index === 0 ? setStep("choose") : go(WIZARD[index - 1]!))}>
             ← {bt.back}
           </button>
           {step === "food" && <button type="button" className="button button--primary" disabled={!quote || quoting} onClick={() => go("details")}>{bt.next} →</button>}
@@ -382,34 +406,48 @@ export function BookingPage() {
 
   // ------------------------------------------------------------------ choose
   const empty = data && data.houses.length === 0 && data.vipTents.length === 0 && !data.camping.enabled;
-  const canBook = (unit: PublicUnitDto) => {
-    const a = availabilityFor(unit);
-    return !!a && a.available && a.fitsGuests;
-  };
+  const canBook = (unit: PublicUnitDto) => !!availabilityFor(unit)?.available;
+  const picked = (unit: PublicUnitDto) => picks.some((p) => pickKey(p) === unit.id);
+  const ready = picks.length > 0 && picks.reduce((a, p) => a + p.adults, 0) >= 1 && picks.every((p) => pickProblem(p, bt) === null);
   const unitGrid = (units: PublicUnitDto[]) => (
     <div className="unit-grid">
       {units.map((u) => (
-        <div key={u.id} className="unit-pick">
+        <div key={u.id} className={`unit-pick${picked(u) ? " is-picked" : ""}`}>
           <UnitCard unit={u} availability={availabilityFor(u)} />
-          {canBook(u) && (
-            <button type="button" className="button button--primary unit-pick__btn" onClick={() => choose({ kind: "UNIT", unit: u })}>
-              {bt.select}
+          {canBook(u) && (picked(u) ? (
+            <button type="button" className="button button--secondary unit-pick__btn" aria-pressed="true"
+              onClick={() => setPicks((cur) => cur.filter((p) => pickKey(p) !== u.id))}>
+              {bt.picked} · {bt.pickRemove}
             </button>
-          )}
+          ) : (
+            <button type="button" className="button button--primary unit-pick__btn" aria-pressed="false" onClick={() => addUnit(u)}>
+              {picks.length ? bt.pickAddMore : bt.pickAdd}
+            </button>
+          ))}
         </div>
       ))}
     </div>
   );
+  const campingPick = picks.find((p) => p.kind === "CAMPING");
+  const goToCamping = () => document.getElementById("sec-camping")?.scrollIntoView({ behavior: "smooth", block: "start" });
 
   return (
-    <div className="page container">
+    <div className={`page container${picks.length ? " has-picks-bar" : ""}`}>
       <h1 className="page__title" tabIndex={-1} ref={headingRef}>{t.pages.booking.title}</h1>
       <p className="page__lead">{t.accommodation.chooseDates}</p>
 
       <StaySearch initial={query} busy={busy} error={searchError} childAge={data?.camping.childFreeUnderAge} showTents={false}
-        onSearch={(q) => void search(q)} />
+        onSearch={(q) => {
+          // Other dates: what was picked may not be free then.
+          if (searched && (q.checkIn !== searched.checkIn || q.checkOut !== searched.checkOut)) setPicks([]);
+          void search(q);
+        }} />
       {!availability && <p className="notice" role="note">{bt.searchFirst}</p>}
       <p className="lookup-link"><Link to={bookingLookupPath(locale)}>{bt.lookupLink} →</Link></p>
+      {picks.length > 0 && (
+        <StayPicks picks={picks} camping={data?.camping ?? null} campingName={data?.camping.name ?? t.accommodation.camping}
+          onChange={setPicks} onEditCamping={goToCamping} onNext={() => start(picks)} />
+      )}
 
       {error && <p role="alert" className="notice notice--error">{t.common.loadError}</p>}
       {!data && !error && <div className="unit-grid" aria-busy="true">{[0, 1, 2].map((i) => <div key={i} className="unit-card unit-card--skeleton" />)}</div>}
@@ -445,15 +483,28 @@ export function BookingPage() {
                     <span>{t.accommodation.perAdultPerNight}</span>
                   </p>
                   <p className="unit-card__meta">{fill(t.accommodation.childrenFree, { age: data.camping.childFreeUnderAge })}</p>
-                  <CampingBooker camping={data.camping} initial={searched ?? query} initialTarp={campingTarp}
+                  <CampingBooker camping={data.camping} initial={campingPick ? { ...(searched ?? query), adults: campingPick.adults, children: campingPick.children, tents: campingPick.tents } : searched ?? query}
+                    initialTarp={campingPick ? campingPick.kind === "CAMPING" && campingPick.tarp : campingTarp}
+                    label={campingPick ? bt.campingUpdate : picks.length ? bt.campingAdd : undefined}
                     onCheck={(q) => search(q, true)} onPeek={peek}
-                    onBook={(q, tarp) => { setCampingTarp(tarp); choose({ kind: "CAMPING", tents: q.tents, tarp }, q); }} />
+                    onBook={(q, tarp) => {
+                      setCampingTarp(tarp);
+                      const pick: Pick = { kind: "CAMPING", tents: q.tents, tarp, adults: q.adults, children: q.children };
+                      track({ name: "select_accommodation", item: trackItem(pick) });
+                      // Camping alone: straight to the booking steps. With other stays: one more stay in the list.
+                      const others = picks.filter((p) => p.kind !== "CAMPING");
+                      if (others.length) {
+                        setPicks([...others, pick]);
+                        document.getElementById("picks")?.scrollIntoView({ behavior: "smooth", block: "start" });
+                      } else start([pick], q);
+                    }} />
                 </>
               )}
             </div>
           </article>
         </section>
       )}
+      {picks.length > 0 && <PicksBar picks={picks} ready={ready} onNext={() => start(picks)} />}
     </div>
   );
 }

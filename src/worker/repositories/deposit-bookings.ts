@@ -1,5 +1,6 @@
 import type { DepositBookingsDto } from "../../shared/accommodation-types.ts";
 import type { D1DatabaseLike } from "../env.ts";
+import { PAID_SQL } from "./booking.repository.ts";
 import { withFallback } from "./schema-fallback.ts";
 
 /**
@@ -17,8 +18,7 @@ export function openDepositBookings(db: D1DatabaseLike, unitId: string | null, n
                 COALESCE(SUM(CASE WHEN booking_status = 'CONFIRMED' AND due > 0 THEN due ELSE 0 END), 0) AS due_satang,
                 COALESCE(SUM(CASE WHEN booking_status = 'PENDING' THEN 1 ELSE 0 END), 0) AS awaiting
            FROM (SELECT b.booking_status,
-                        b.total_satang - (SELECT COALESCE(SUM(p.amount_satang), 0) FROM payments p
-                                           WHERE p.booking_id = b.id AND p.status IN ('VERIFIED', 'PAID')) AS due
+                        b.total_satang - ${PAID_SQL} AS due
                    FROM bookings b
                   WHERE b.deposit_satang IS NOT NULL
                     AND (b.booking_status = 'CONFIRMED' OR (b.booking_status = 'PENDING' AND (b.expires_at IS NULL OR b.expires_at > ?2)))

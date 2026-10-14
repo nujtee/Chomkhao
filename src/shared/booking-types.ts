@@ -17,10 +17,17 @@ export const PAYMENT_STATUSES_ALL: readonly PaymentStatus[] = ["UNPAID", "PENDIN
 export const BOOKING_CODE_PATTERN = /^BK-\d{8}-[A-Z0-9]{4}$/;
 export const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9-]{16,64}$/;
 
-/** What the guest chose: one unit, or own-tent camping with N tents (and optionally one tarp area). */
+/**
+ * One stay the guest chose: a house / VIP tent, or own-tent camping with N tents (and optionally one tarp area).
+ * In `stays` (several stays in one booking) each stay carries its own guests; a single legacy `stay` takes the
+ * booking's adults / children.
+ */
 export type StaySelection =
-  | { kind: "UNIT"; unitId: string }
-  | { kind: "CAMPING"; tents: number; tarp?: boolean };
+  | { kind: "UNIT"; unitId: string; adults?: number; children?: number }
+  | { kind: "CAMPING"; tents: number; tarp?: boolean; adults?: number; children?: number };
+
+/** Most stays one booking can hold (houses / VIP tents + camping). */
+export const MAX_STAYS_PER_BOOKING = 10;
 
 export interface FoodSelection {
   optionId: string;
@@ -35,9 +42,13 @@ export interface FoodSelection {
 export interface QuoteRequest {
   checkIn: string;
   checkOut: string;
+  /** All guests of the booking (with `stays`: the sum of the stays' guests). */
   adults: number;
   children: number;
-  stay: StaySelection;
+  /** One stay (older pages). */
+  stay?: StaySelection;
+  /** Several stays on the same dates, each with its own guests (same check-in / check-out for all). */
+  stays?: StaySelection[];
   food: FoodSelection[];
   lang?: string;
 }
@@ -71,6 +82,16 @@ export interface QuoteItemDto {
   pricingType: "PER_UNIT_NIGHT" | "PER_ADULT_NIGHT";
   nightly: NightPriceDto[];
   subtotalSatang: number;
+  /** Guests of this stay. */
+  adults: number;
+  children: number;
+  /** Deposit plan: the part of this stay (with its tarp area) left for check-in; 0 = paid in full now. */
+  payLaterSatang: number;
+  /** A booking's stay (not in a quote): its id, and whether staff cancelled it. */
+  id?: string;
+  status?: "ACTIVE" | "CANCELLED";
+  /** Why staff cancelled this stay alone. */
+  cancelReason?: string | null;
 }
 
 /** Camping add-on: extra space for a tarp next to the tents, priced per area per night (one per booking). */
@@ -86,6 +107,8 @@ export interface IncludedMealDto {
   name: string;
   personsPerNight: number;
   nights: number;
+  /** The stay it comes with (several stays in the booking); null with one stay. */
+  stayName?: string | null;
 }
 
 export interface FoodLineDto {
@@ -108,6 +131,9 @@ export interface QuoteDto {
   nights: number;
   adults: number;
   children: number;
+  /** The stays, in the order chosen (a booking also lists the stays staff cancelled, with status CANCELLED). */
+  items: QuoteItemDto[];
+  /** The first stay — kept for pages built before several stays per booking. */
   item: QuoteItemDto;
   /** Tarp area (camping only); its price is part of accommodationSubtotalSatang. */
   tarp: TarpLineDto | null;
@@ -150,6 +176,13 @@ export interface PublicBookingDto extends QuoteDto {
   cancelReason: string | null;
 }
 
+/** A stay in admin lists: what it is and, for camping, how many tents. */
+export interface BookingStayBriefDto {
+  type: BookingItemType;
+  name: string;
+  quantity: number;
+}
+
 export interface AdminBookingSummaryDto {
   id: string;
   bookingCode: string;
@@ -160,9 +193,12 @@ export interface AdminBookingSummaryDto {
   nights: number;
   adults: number;
   children: number;
+  /** First stay (type / quantity); itemName names every stay ("House 01 + VIP 02 + Camping"). */
   itemType: BookingItemType;
   itemName: string;
   quantity: number;
+  /** Every active stay of the booking. */
+  stays: BookingStayBriefDto[];
   /** Tarp areas booked with own-tent camping (0 = none). */
   tarps: number;
   customerName: string;
@@ -219,6 +255,8 @@ export interface AdminBookingDto extends PublicBookingDto {
    * agreed at booking time (the rest is still taken at check-in).
    */
   depositPlanKept: boolean;
+  /** Money received beyond the total (a stay was cancelled after payment): to refund to the guest. */
+  overpaidSatang: number;
 }
 
 // ------------------------------------------------------------------ food catalogue for a stay

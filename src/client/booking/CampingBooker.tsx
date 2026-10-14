@@ -22,10 +22,12 @@ export function campingFits(a: AvailabilityDto, tarp: boolean): boolean {
  * to the booking steps when everything fits; otherwise it says what to change, right here.
  * With `onPeek`, the tent spots (and tarp areas) still free on the chosen dates show as soon as the dates are set.
  */
-export function CampingBooker({ camping, initial, initialTarp = false, onCheck, onPeek, onBook }: {
+export function CampingBooker({ camping, initial, initialTarp = false, label, onCheck, onPeek, onBook }: {
   camping: PublicCampingDto;
   initial: StayQuery;
   initialTarp?: boolean;
+  /** Button text when camping joins other stays of the booking (default: book camping). */
+  label?: string;
   onCheck: (q: StayQuery) => Promise<Check>;
   /** Live availability for the dates only (no side effects on the page): keep it stable (useCallback). */
   onPeek?: (q: StayQuery) => Promise<Check>;
@@ -173,7 +175,7 @@ export function CampingBooker({ camping, initial, initialTarp = false, onCheck, 
 
       <div className="camping-form__foot">
         <button type="submit" className="button button--primary" disabled={busy} aria-busy={busy || undefined}>
-          {busy ? t.accommodation.searching : bt.selectCamping}
+          {busy ? t.accommodation.searching : label ?? bt.selectCamping}
         </button>
         {nights > 0 && <span className="stay-search__nights">{fill(t.accommodation.nights, { n: nights })}</span>}
       </div>

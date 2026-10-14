@@ -26,7 +26,9 @@
   ],
   "src/worker/repositories/booking.repository.ts": [
     "deposit",
-    "ended"
+    "done",
+    "ended",
+    "extra"
   ],
   "src/worker/repositories/dashboard.repository.ts": [
     "select",
@@ -43,6 +45,7 @@
     "deposit",
     "flag",
     "guard",
+    "netPayment(\"p\")",
     "redeemedHere"
   ],
   "src/worker/repositories/media.repository.ts": [

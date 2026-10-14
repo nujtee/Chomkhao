@@ -1,3 +1,4 @@
+import { STAY_NAMES_SQL } from "./stay-sql.ts";
 import type { D1DatabaseLike, D1PreparedStatementLike } from "../env.ts";
 
 export interface FoodOrderRow {
@@ -75,8 +76,7 @@ export class FoodAdminRepository {
     const { results } = await this.db
       .prepare(
         `SELECT o.id, o.booking_id, b.booking_code, b.booking_status, b.payment_status, b.customer_name,
-                (SELECT s.unit_name_snapshot FROM booking_items i JOIN booking_price_snapshots s ON s.booking_item_id = i.id
-                  WHERE i.booking_id = b.id ORDER BY i.created_at, i.id LIMIT 1) AS item_name,
+                ${STAY_NAMES_SQL} AS item_name,
                 o.food_category_id, c.code AS category_code, o.service_date, c.service_time, o.status, o.total_persons,
                 o.kitchen_note, o.updated_at
            FROM food_orders o

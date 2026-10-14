@@ -1,3 +1,4 @@
+import { paidOf } from "./booking-money.ts";
 import type {
   ApprovalMode, PaymentChannel, PaymentDto, PaymentMethod, PaymentSettingsDto, PaymentSettingsInput, ReceivingAccountDto, ReceivingAccountInput,
 } from "../../shared/payment-types.ts";
@@ -299,10 +300,15 @@ export class PaymentService {
   ): Promise<PaymentDto[]> {
     await this.authz.requirePermission(actor, "payments.refund", meta);
     const booking = await this.findBooking(code);
-    if (booking.booking_status !== "CANCELLED" && booking.booking_status !== "NO_SHOW") {
+    const payments = await this.repo.payments(booking.id);
+    // A booking still on can only have what was paid beyond its total refunded (a stay cancelled after payment).
+    const overpaid = paidOf(payments) - booking.total_satang;
+    const ended = booking.booking_status === "CANCELLED" || booking.booking_status === "NO_SHOW";
+    if (!ended && (overpaid <= 0 || booking.booking_status === "EXPIRED")) {
       throw new ConflictError("Cancel the booking before refunding", "CANCEL_BEFORE_REFUND");
     }
-    const payment = (await this.repo.payments(booking.id)).find((p) => p.id === paymentId);
+    if (!ended && input.amountSatang > overpaid) throw new ValidationError({ amountSatang: "MORE_THAN_OVERPAID" });
+    const payment = payments.find((p) => p.id === paymentId);
     if (!payment) throw new NotFoundError("Payment not found", "PAYMENT_NOT_FOUND");
     if (payment.status !== "PAID" && payment.status !== "VERIFIED") throw new ConflictError("Only a paid payment can be refunded", "PAYMENT_NOT_REFUNDABLE");
     if (input.amountSatang > payment.amount_satang) throw new ValidationError({ amountSatang: "MORE_THAN_PAID" });

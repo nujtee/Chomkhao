@@ -1,6 +1,7 @@
 import type { D1DatabaseLike, D1PreparedStatementLike } from "../env.ts";
 import { withFallback } from "./schema-fallback.ts";
 import { containsPattern } from "./sql-like.ts";
+import { STAY_NAMES_SQL, STAYS_JSON_SQL } from "./stay-sql.ts";
 
 export interface BookingRow {
   id: string;
@@ -50,6 +51,13 @@ export interface BookingItemRow {
   pricing_type: "PER_UNIT_NIGHT" | "PER_ADULT_NIGHT";
   nightly_prices_json: string | null;
   snapshot_subtotal_satang: number;
+  adults: number;
+  children: number;
+  /** Deposit plan: the part of this stay left for check-in (migration 0026). */
+  pay_later_satang: number;
+  /** Set when staff cancelled this stay alone (the booking goes on). */
+  cancelled_at: string | null;
+  cancel_reason: string | null;
 }
 
 export interface BookingIncludedRow {
@@ -57,6 +65,10 @@ export interface BookingIncludedRow {
   persons_per_night_snapshot: number;
   number_of_nights: number;
   category_code: string;
+  booking_item_id: string;
+  /** Name of the stay the meal comes with, and whether that stay is still on. */
+  stay_name: string;
+  item_status: string;
 }
 
 export interface BookingFoodRow {
@@ -95,6 +107,8 @@ export interface AdminBookingListRow {
   item_type: "HOUSE" | "VIP_TENT" | "OWN_TENT";
   item_name: string;
   quantity: number;
+  /** Every stay (STAYS_JSON_SQL). */
+  stays_json: string | null;
   tarps: number;
 }
 
@@ -115,7 +129,17 @@ const BOOKING_COLUMNS = bookingColumns("deposit_satang");
 const BOOKING_COLUMNS_LEGACY = bookingColumns("NULL");
 
 /** Money received for booking `b` (verified / paid payments). What is still due = total_satang − this. */
-export const PAID_SQL = `(SELECT COALESCE(SUM(p.amount_satang), 0) FROM payments p WHERE p.booking_id = b.id AND p.status IN ('VERIFIED', 'PAID'))`;
+export const PAID_SQL = `(SELECT COALESCE(SUM(${netPayment("p")}), 0) FROM payments p WHERE p.booking_id = b.id)`;
+
+/**
+ * Money kept from payment `p`: a verified / paid payment in full, and what is left of a partly refunded one (staff
+ * refund what was paid for a cancelled stay, migration 0026). Same rule as trg_bookings_checkin_paid.
+ */
+export function netPayment(p: string): string {
+  return `CASE WHEN ${p}.status IN ('VERIFIED', 'PAID') THEN ${p}.amount_satang
+               WHEN ${p}.status = 'REFUNDED' THEN ${p}.amount_satang - COALESCE(${p}.refund_amount_satang, ${p}.amount_satang)
+               ELSE 0 END`;
+}
 
 /** SQL for bookings. The service composes these statements into one atomic batch. */
 export class BookingRepository {
@@ -142,19 +166,24 @@ export class BookingRepository {
     );
   }
 
+  /** The booking's stays in the order chosen (cancelled ones included: see `status` / `cancelled_at`). */
   async items(bookingId: string): Promise<BookingItemRow[]> {
-    const { results } = await this.db
+    const read = async (extra: string) => (await this.db
       .prepare(
         `SELECT i.id, i.item_type, i.unit_id, i.quantity, i.status, u.slug, s.unit_name_snapshot, s.pricing_type,
-                s.nightly_prices_json, s.subtotal_satang AS snapshot_subtotal_satang
+                s.nightly_prices_json, s.subtotal_satang AS snapshot_subtotal_satang, i.adults, i.children, ${extra}
            FROM booking_items i
            JOIN booking_price_snapshots s ON s.booking_item_id = i.id
            LEFT JOIN accommodation_units u ON u.id = i.unit_id
           WHERE i.booking_id = ?1 ORDER BY i.created_at, i.id`,
       )
       .bind(bookingId)
-      .all<BookingItemRow>();
-    return results;
+      .all<BookingItemRow>()).results;
+    // Before migration 0026: one stay per booking, nothing left for check-in per stay, never cancelled alone.
+    return withFallback(
+      () => read("i.pay_later_satang, i.cancelled_at, i.cancel_reason"),
+      () => read("0 AS pay_later_satang, NULL AS cancelled_at, NULL AS cancel_reason"),
+    );
   }
 
   /** Tarp area snapshot of a booking (camping add-on), if it has one. */
@@ -173,9 +202,12 @@ export class BookingRepository {
   async includedMeals(bookingId: string): Promise<BookingIncludedRow[]> {
     const { results } = await this.db
       .prepare(
-        `SELECT m.meal_name_snapshot, m.persons_per_night_snapshot, m.number_of_nights, c.code AS category_code
+        `SELECT m.meal_name_snapshot, m.persons_per_night_snapshot, m.number_of_nights, c.code AS category_code,
+                m.booking_item_id, s.unit_name_snapshot AS stay_name, i.status AS item_status
            FROM booking_included_meals m JOIN food_categories c ON c.id = m.food_category_id
-          WHERE m.booking_id = ?1 ORDER BY c.sort_order, m.id`,
+           JOIN booking_items i ON i.id = m.booking_item_id
+           JOIN booking_price_snapshots s ON s.booking_item_id = m.booking_item_id
+          WHERE m.booking_id = ?1 ORDER BY i.created_at, i.id, c.sort_order, m.id`,
       )
       .bind(bookingId)
       .all<BookingIncludedRow>();
@@ -212,7 +244,7 @@ export class BookingRepository {
       .prepare(
         `SELECT b.id, b.booking_code, b.booking_status, b.payment_status, b.check_in, b.check_out, b.nights, b.adults, b.children,
                 b.customer_name, b.customer_phone, b.total_satang, ${deposit} AS deposit_satang, ${PAID_SQL} AS paid_satang, b.expires_at, b.created_at,
-                i.item_type, s.unit_name_snapshot AS item_name, i.quantity,
+                i.item_type, COALESCE(${STAY_NAMES_SQL}, s.unit_name_snapshot) AS item_name, i.quantity, ${STAYS_JSON_SQL} AS stays_json,
                 (SELECT COALESCE(SUM(t.quantity), 0) FROM booking_tarps t WHERE t.booking_id = b.id) AS tarps
            FROM bookings b
            JOIN booking_items i ON i.id = (SELECT id FROM booking_items WHERE booking_id = b.id ORDER BY created_at, id LIMIT 1)
@@ -277,15 +309,20 @@ export class BookingRepository {
         b.currency, b.expiresAt, b.idempotencyKey, b.privacyAcceptedAt, b.now, b.deposit);
   }
 
+  /**
+   * One stay of the booking. `payLater`: the part of this stay left for check-in on a deposit plan (migration 0026).
+   * `order` keeps the stays in the order chosen (created_at + order milliseconds, all in the same batch).
+   */
   insertItemStatement(i: {
-    id: string; bookingId: string; type: string; unitId: string | null; quantity: number; adults: number; children: number; now: string;
+    id: string; bookingId: string; type: string; unitId: string | null; quantity: number; adults: number; children: number;
+    payLater: number; now: string;
   }): D1PreparedStatementLike {
     return this.db
       .prepare(
-        `INSERT INTO booking_items (id, booking_id, item_type, unit_id, quantity, adults, children, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)`,
+        `INSERT INTO booking_items (id, booking_id, item_type, unit_id, quantity, adults, children, created_at, pay_later_satang)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)`,
       )
-      .bind(i.id, i.bookingId, i.type, i.unitId, i.quantity, i.adults, i.children, i.now);
+      .bind(i.id, i.bookingId, i.type, i.unitId, i.quantity, i.adults, i.children, i.now, i.payLater);
   }
 
   /** PK (unit_id, stay_date) makes a second booking of the same night fail the whole batch. */
@@ -403,20 +440,112 @@ export class BookingRepository {
       .bind(o.id, o.bookingId, o.categoryId, o.date, o.persons, o.reserved, o.now);
   }
 
+  /** `itemId`: the stay an included meal comes with (it goes with that stay if staff cancel it); null for extra food. */
   insertFoodItemStatement(f: {
     id: string; bookingId: string; orderId: string; optionId: string; date: string; name: string; categoryCode: string;
     pricingType: string; unitPrice: number; childPricing: string; childPrice: number | null; adults: number; children: number;
-    quantity: number; included: number; subtotal: number; now: string;
+    quantity: number; included: number; subtotal: number; itemId: string | null; now: string;
   }): D1PreparedStatementLike {
     return this.db
       .prepare(
         `INSERT INTO booking_food_items (id, booking_id, food_order_id, food_option_id, service_date, option_name_snapshot,
            category_code_snapshot, pricing_type_snapshot, unit_price_snapshot_satang, child_pricing_snapshot,
-           child_price_snapshot_satang, adults, children, quantity, included_quantity, subtotal_satang, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)`,
+           child_price_snapshot_satang, adults, children, quantity, included_quantity, subtotal_satang, created_at, booking_item_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)`,
       )
       .bind(f.id, f.bookingId, f.orderId, f.optionId, f.date, f.name, f.categoryCode, f.pricingType, f.unitPrice,
-        f.childPricing, f.childPrice, f.adults, f.children, f.quantity, f.included, f.subtotal, f.now);
+        f.childPricing, f.childPrice, f.adults, f.children, f.quantity, f.included, f.subtotal, f.now, f.itemId);
+  }
+
+  // ================================================================ cancel one stay (the booking goes on)
+
+  /**
+   * Staff cancel one stay of a booking that holds several (migration 0026). Statement 1 marks the stay cancelled only
+   * while the booking is still exactly as read (status live, same updated_at) and RETURNs its id; every later
+   * statement runs only if that happened (marker: the stay's cancelled_at = now). The booking's money is the
+   * caller's calculation from that same read: totals, guests and the deposit worked out from the stays left.
+   */
+  cancelStayStatements(c: {
+    bookingId: string; itemId: string; readAt: string; reason: string; now: string;
+    checkIn: string; checkOut: string;
+    /** Own-tent camping: tents to give back, and whether its tarp area goes too. */
+    tents: number; tarp: boolean;
+    booking: { accommodation: number; total: number; deposit: number | null; adults: number; children: number };
+  }): D1PreparedStatementLike[] {
+    const db = this.db;
+    // ?1 = item, ?2 = booking, ?3 = now in every statement after the first.
+    const done = "EXISTS (SELECT 1 FROM booking_items WHERE id = ?1 AND booking_id = ?2 AND cancelled_at = ?3)";
+    const head = [c.itemId, c.bookingId, c.now] as const;
+    const statements: D1PreparedStatementLike[] = [
+      db
+        .prepare(
+          `UPDATE booking_items SET status = 'CANCELLED', cancelled_at = ?3, cancel_reason = ?4
+            WHERE id = ?1 AND booking_id = ?2 AND status = 'ACTIVE'
+              AND EXISTS (SELECT 1 FROM bookings WHERE id = ?2 AND booking_status IN ('PENDING', 'CONFIRMED') AND updated_at = ?5)
+              AND (SELECT COUNT(*) FROM booking_items WHERE booking_id = ?2 AND status = 'ACTIVE') >= 2
+            RETURNING id`,
+        )
+        .bind(...head, c.reason, c.readAt),
+      // The booking without that stay (CHECKs: total = accommodation + food, deposit below the total, an adult left).
+      db
+        .prepare(
+          `UPDATE bookings SET accommodation_subtotal_satang = ?4, subtotal_satang = ?4 + food_subtotal_satang,
+             total_satang = ?5, deposit_satang = ?6, adults = ?7, children = ?8, updated_at = ?3
+            WHERE id = ?2 AND ${done}`,
+        )
+        .bind(...head, c.booking.accommodation, c.booking.total, c.booking.deposit, c.booking.adults, c.booking.children),
+      // Its nights free up for other guests.
+      db.prepare(`DELETE FROM booking_unit_nights WHERE booking_item_id = ?1 AND booking_id = ?2 AND ${done}`).bind(...head),
+    ];
+    if (c.tents > 0) {
+      statements.push(
+        db
+          .prepare(
+            `UPDATE camping_night_inventory SET tents_used = MAX(0, tents_used - ?4), updated_at = ?3
+              WHERE stay_date >= ?5 AND stay_date < ?6 AND ${done}`,
+          )
+          .bind(...head, c.tents, c.checkIn, c.checkOut),
+      );
+    }
+    if (c.tarp) {
+      statements.push(
+        db
+          .prepare(
+            `UPDATE camping_tarp_night_inventory
+                SET tarps_used = MAX(0, tarps_used - (SELECT COALESCE(SUM(quantity), 0) FROM booking_tarps WHERE booking_id = ?2 AND status = 'ACTIVE')),
+                    updated_at = ?3
+              WHERE stay_date >= ?4 AND stay_date < ?5 AND ${done}`,
+          )
+          .bind(...head, c.checkIn, c.checkOut),
+        db.prepare(`UPDATE booking_tarps SET status = 'CANCELLED' WHERE booking_id = ?2 AND status = 'ACTIVE' AND ${done}`).bind(...head),
+      );
+    }
+    statements.push(
+      // Meals that came with the stay: the kitchen cooks for fewer people (an order left with nothing is cancelled).
+      db
+        .prepare(
+          `UPDATE food_orders
+              SET total_persons = MAX(0, total_persons - (SELECT COALESCE(SUM(f.quantity), 0) FROM booking_food_items f
+                                                          WHERE f.food_order_id = food_orders.id AND f.booking_item_id = ?1 AND f.status = 'ACTIVE')),
+                  updated_at = ?3
+            WHERE booking_id = ?2 AND status <> 'CANCELLED'
+              AND id IN (SELECT food_order_id FROM booking_food_items WHERE booking_item_id = ?1 AND status = 'ACTIVE') AND ${done}`,
+        )
+        .bind(...head),
+      db.prepare(`UPDATE booking_food_items SET status = 'CANCELLED' WHERE booking_item_id = ?1 AND status = 'ACTIVE' AND ${done}`).bind(...head),
+      db
+        .prepare(
+          `UPDATE food_orders SET status = 'CANCELLED', updated_at = ?3
+            WHERE booking_id = ?2 AND status IN ('PENDING', 'CONFIRMED') AND capacity_reserved = 0
+              AND NOT EXISTS (SELECT 1 FROM booking_food_items f WHERE f.food_order_id = food_orders.id AND f.status = 'ACTIVE') AND ${done}`,
+        )
+        .bind(...head),
+      // A PayPal order made for the old amount is no longer valid.
+      db
+        .prepare(`UPDATE paypal_orders SET status = 'CANCELLED', failure_code = 'BOOKING_CHANGED', updated_at = ?3 WHERE booking_id = ?2 AND status = 'CREATED' AND ${done}`)
+        .bind(...head),
+    );
+    return statements;
   }
 
   // ================================================================ end of a hold (cancel / expire)

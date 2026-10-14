@@ -1,4 +1,5 @@
 import { maskEmailHalf, maskPhoneHalf } from "../../shared/booking-types.ts";
+import { netPayment } from "./booking.repository.ts";
 import { withFallback } from "./schema-fallback.ts";
 import type { D1DatabaseLike, D1PreparedStatementLike } from "../env.ts";
 import type { MsgBooking, MsgFood } from "../line/line-templates.ts";
@@ -534,15 +535,17 @@ export class LineRepository {
         .prepare(
           `SELECT id, booking_code, customer_name, customer_phone, customer_email, check_in, check_out, nights, adults, children, booking_status,
                   payment_status, total_satang, ${deposit} AS deposit_satang, cancel_reason, expires_at, created_at,
-                  (SELECT COALESCE(SUM(p.amount_satang), 0) FROM payments p WHERE p.booking_id = bookings.id AND p.status IN ('VERIFIED', 'PAID')) AS paid_satang
+                  (SELECT COALESCE(SUM(${netPayment("p")}), 0) FROM payments p WHERE p.booking_id = bookings.id) AS paid_satang
              FROM bookings WHERE id IN (SELECT value FROM json_each(?1)) ORDER BY check_in, booking_code`,
         )
         .bind(list),
       this.db
         .prepare(
           `SELECT i.booking_id, i.item_type, i.quantity, s.unit_name_snapshot,
-                  (SELECT COALESCE(SUM(t.quantity), 0) FROM booking_tarps t WHERE t.booking_id = i.booking_id) AS tarps
-             FROM booking_items i JOIN booking_price_snapshots s ON s.booking_item_id = i.id
+                  (SELECT COALESCE(SUM(t.quantity), 0) FROM booking_tarps t
+                    WHERE t.booking_id = i.booking_id AND (t.status = 'ACTIVE' OR b.booking_status IN ('CANCELLED', 'EXPIRED'))) AS tarps,
+                  (i.status = 'ACTIVE' OR b.booking_status IN ('CANCELLED', 'EXPIRED')) AS live
+             FROM booking_items i JOIN booking_price_snapshots s ON s.booking_item_id = i.id JOIN bookings b ON b.id = i.booking_id
             WHERE i.booking_id IN (SELECT value FROM json_each(?1)) ORDER BY i.created_at, i.id`,
         )
         .bind(list),
@@ -562,23 +565,27 @@ export class LineRepository {
       booking_status: string; payment_status: string; total_satang: number; deposit_satang: number | null; cancel_reason: string | null; expires_at: string | null; created_at: string;
       paid_satang: number;
     };
-    type I = { booking_id: string; item_type: MsgBooking["itemType"]; quantity: number; unit_name_snapshot: string; tarps: number };
+    type I = { booking_id: string; item_type: MsgBooking["itemType"]; quantity: number; unit_name_snapshot: string; tarps: number; live: number };
     type F = { booking_id: string; service_date: string; option_name_snapshot: string; quantity: number; service_time: string | null; category: string };
-    const firstItem = new Map<string, I>();
-    for (const i of (items?.results ?? []) as I[]) if (!firstItem.has(i.booking_id)) firstItem.set(i.booking_id, i);
+    // The stays that count (a stay cancelled alone is left out), in the order chosen.
+    const staysBy = new Map<string, I[]>();
+    for (const i of (items?.results ?? []) as I[]) if (i.live) staysBy.set(i.booking_id, [...(staysBy.get(i.booking_id) ?? []), i]);
     const foodBy = new Map<string, MsgFood[]>();
     for (const f of (food?.results ?? []) as F[]) {
       foodBy.set(f.booking_id, [...(foodBy.get(f.booking_id) ?? []), { date: f.service_date, category: f.category, time: f.service_time, dish: f.option_name_snapshot, quantity: f.quantity }]);
     }
     return ((b?.results ?? []) as B[]).map((r) => {
-      const item = firstItem.get(r.id);
+      const stays = staysBy.get(r.id) ?? [];
+      const item = stays[0];
+      const camp = stays.find((s) => s.item_type === "OWN_TENT");
       return {
         code: r.booking_code, customerName: r.customer_name,
         // Masked here, so a message can never carry the full number / address.
         customerPhoneMasked: maskPhoneHalf(r.customer_phone), customerEmailMasked: r.customer_email?.trim() ? maskEmailHalf(r.customer_email) : null,
         checkIn: r.check_in, checkOut: r.check_out, nights: r.nights,
-        itemType: item?.item_type ?? "HOUSE", itemName: item?.unit_name_snapshot ?? "—", tents: item?.item_type === "OWN_TENT" ? item.quantity : 0,
-        tarps: item?.item_type === "OWN_TENT" ? item.tarps : 0,
+        itemType: item?.item_type ?? "HOUSE", itemName: item?.unit_name_snapshot ?? "—", tents: camp?.quantity ?? 0,
+        tarps: camp?.tarps ?? 0,
+        stays: stays.map((s) => ({ type: s.item_type, name: s.unit_name_snapshot, quantity: s.quantity })),
         adults: r.adults, children: r.children, bookingStatus: r.booking_status, paymentStatus: r.payment_status,
         totalSatang: r.total_satang, depositSatang: r.deposit_satang, paidSatang: r.paid_satang, food: foodBy.get(r.id) ?? [],
         cancelReason: r.cancel_reason, expiresAt: r.booking_status === "PENDING" ? r.expires_at : null, createdAt: r.created_at,

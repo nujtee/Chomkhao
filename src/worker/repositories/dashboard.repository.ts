@@ -1,6 +1,7 @@
 import type { D1DatabaseLike } from "../env.ts";
 import { PAID_SQL } from "./booking.repository.ts";
 import { withFallback } from "./schema-fallback.ts";
+import { STAY_NAMES_SQL, STAYS_JSON_SQL } from "./stay-sql.ts";
 
 /** Statuses that count as a sale once paid (spec §26). */
 const SOLD = "('CONFIRMED', 'CHECKED_IN', 'CHECKED_OUT', 'NO_SHOW')";
@@ -10,7 +11,7 @@ const PAID = "('PAID', 'VERIFIED')";
 const bookingWithItem = (deposit: string) => `
   SELECT b.booking_code, b.customer_name, b.check_in, b.check_out, b.nights, b.adults, b.children,
          b.booking_status, b.payment_status, b.total_satang, ${deposit} AS deposit_satang, ${PAID_SQL} AS paid_satang,
-         i.item_type, i.unit_id, i.quantity, s.unit_name_snapshot AS item_name,
+         i.item_type, i.unit_id, i.quantity, COALESCE(${STAY_NAMES_SQL}, s.unit_name_snapshot) AS item_name, ${STAYS_JSON_SQL} AS stays_json,
          (SELECT COALESCE(SUM(t.quantity), 0) FROM booking_tarps t WHERE t.booking_id = b.id) AS tarps
     FROM bookings b
     JOIN booking_items i ON i.id = (SELECT id FROM booking_items WHERE booking_id = b.id ORDER BY created_at, id LIMIT 1)
@@ -36,6 +37,7 @@ export interface BookingItemListRow {
   unit_id: string | null;
   quantity: number;
   item_name: string;
+  stays_json: string | null;
   tarps: number;
 }
 

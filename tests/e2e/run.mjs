@@ -18,7 +18,7 @@ import { join } from "node:path";
 import { makeFixtures } from "./fixtures.mjs";
 
 const ROOT = join(import.meta.dirname, "..", "..");
-const ALL = ["phase09", "phase10", "phase11", "phase12", "phase13", "phase14", "phase16", "payment", "responsive"];
+const ALL = ["phase09", "phase10", "phase11", "phase12", "phase13", "phase14", "phase16", "payment", "multistay", "responsive"];
 const suites = process.argv.slice(2).filter((a) => !a.startsWith("-"));
 const selected = suites.length ? suites : ALL;
 for (const s of selected) if (!ALL.includes(s)) { console.error(`unknown suite ${s} (known: ${ALL.join(", ")})`); process.exit(2); }
