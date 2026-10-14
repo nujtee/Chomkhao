@@ -113,6 +113,25 @@ describe("several stays in one booking", () => {
     assert.equal(booking.depositSatang, q.data.depositSatang);
     assert.deepEqual(h.db.all<{ p: number }>("SELECT pay_later_satang AS p FROM booking_items ORDER BY created_at").map((r) => r.p), [350_000, 0]);
   });
+
+  it("deposit house + VIP tent paid in full: half the house + the whole tent now, the other half at check-in", async () => {
+    const { h, admin, quote, book } = await setup();
+    await h.api("PATCH", "/api/admin/accommodations/dev_house_01", { token: admin, body: { paymentMode: "DEPOSIT_50" } });
+    const oneNight = { checkOut: "2027-02-02" };
+    const q = await quote([house1, vip1], oneNight);
+    // House 01 ฿3,500 (half = ฿1,750 at check-in), VIP-01 ฿1,800 paid in full.
+    assert.deepEqual(q.data.items.map((i) => [i.subtotalSatang, i.payLaterSatang]), [[350_000, 175_000], [180_000, 0]]);
+    assert.equal(q.data.depositSatang, 175_000 + 180_000);
+    const { booking } = await book([house1, vip1], oneNight);
+    assert.equal(booking.depositSatang, 355_000);
+
+    // The other way round: house in full, VIP tent half.
+    await h.api("PATCH", "/api/admin/accommodations/dev_house_01", { token: admin, body: { paymentMode: "FULL" } });
+    await h.api("PATCH", "/api/admin/accommodations/dev_vip_01", { token: admin, body: { paymentMode: "DEPOSIT_50" } });
+    const r = await quote([house1, vip1], { checkIn: "2027-02-05", checkOut: "2027-02-06" });
+    assert.deepEqual(r.data.items.map((i) => i.payLaterSatang), [0, 90_000]);
+    assert.equal(r.data.depositSatang, 350_000 + 90_000);
+  });
 });
 
 describe("cancelling one stay of a booking", () => {
