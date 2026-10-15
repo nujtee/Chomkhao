@@ -49,7 +49,7 @@ const th = {
   },
   cols: { date: "วันที่", by: "ผู้ขอ", plan: "แพ็กเกจ", amount: "ยอด (บาท)", credited: "เข้า (เครดิต)", status: "สถานะ", check: "ตรวจอัตโนมัติ", actions: "การดำเนินการ" },
   reasons: {
-    AMOUNT_MISMATCH: "ยอดไม่ตรง", DATE_OUT_OF_RANGE: "เวลาโอนไม่อยู่ในช่วง", RECEIVER_MISMATCH: "บัญชีปลายทางไม่ตรง", RECEIVER_UNCONFIRMED: "ยืนยันบัญชีปลายทางไม่ได้",
+    AMOUNT_MISMATCH: "ยอดไม่ตรง", DATE_OUT_OF_RANGE: "เวลาโอนไม่อยู่ในช่วง", RECEIVER_MISMATCH: "บัญชีปลายทางไม่ตรง", RECEIVER_UNCONFIRMED: "ยืนยันบัญชีปลายทางไม่ได้", RECEIVER_READ: "ปลายทางบนสลิป: {value}",
     DUPLICATE_TRANSACTION: "สลิปนี้ถูกใช้แล้ว", INTERNAL: "ระบบตรวจขัดข้อง", PROVIDER_TIMEOUT: "บริการตรวจสลิปไม่ตอบ", PROVIDER_UNREACHABLE: "ติดต่อบริการตรวจสลิปไม่ได้",
   },
   verify: { PASSED: "ผ่าน", FAILED: "ไม่ผ่าน", NOT_A_SLIP: "ไม่ใช่สลิป", ERROR: "ตรวจไม่ได้" },
@@ -195,7 +195,7 @@ const en: AdminCreditMessages = {
   },
   cols: { date: "Date", by: "Requested by", plan: "Plan", amount: "Amount (THB)", credited: "Credited", status: "Status", check: "Automatic check", actions: "Actions" },
   reasons: {
-    AMOUNT_MISMATCH: "Amount differs", DATE_OUT_OF_RANGE: "Transfer time out of range", RECEIVER_MISMATCH: "Wrong receiving account", RECEIVER_UNCONFIRMED: "Receiving account unconfirmed",
+    AMOUNT_MISMATCH: "Amount differs", DATE_OUT_OF_RANGE: "Transfer time out of range", RECEIVER_MISMATCH: "Wrong receiving account", RECEIVER_UNCONFIRMED: "Receiving account unconfirmed", RECEIVER_READ: "Receiver on the slip: {value}",
     DUPLICATE_TRANSACTION: "Slip already used", INTERNAL: "Check failed", PROVIDER_TIMEOUT: "Slip service timed out", PROVIDER_UNREACHABLE: "Slip service unreachable",
   },
   verify: { PASSED: "Passed", FAILED: "Failed", NOT_A_SLIP: "Not a slip", ERROR: "Could not check" },
@@ -337,7 +337,7 @@ const zhCN: AdminCreditMessages = {
   },
   cols: { date: "日期", by: "申请人", plan: "套餐", amount: "金额（泰铢）", credited: "到账积分", status: "状态", check: "自动核验", actions: "操作" },
   reasons: {
-    AMOUNT_MISMATCH: "金额不符", DATE_OUT_OF_RANGE: "转账时间不符", RECEIVER_MISMATCH: "收款账户不符", RECEIVER_UNCONFIRMED: "无法确认收款账户",
+    AMOUNT_MISMATCH: "金额不符", DATE_OUT_OF_RANGE: "转账时间不符", RECEIVER_MISMATCH: "收款账户不符", RECEIVER_UNCONFIRMED: "无法确认收款账户", RECEIVER_READ: "凭证上的收款方：{value}",
     DUPLICATE_TRANSACTION: "凭证已被使用", INTERNAL: "核验出错", PROVIDER_TIMEOUT: "核验服务超时", PROVIDER_UNREACHABLE: "无法连接核验服务",
   },
   verify: { PASSED: "通过", FAILED: "未通过", NOT_A_SLIP: "非转账凭证", ERROR: "无法核验" },

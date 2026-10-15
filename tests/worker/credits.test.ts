@@ -297,7 +297,7 @@ describe("top-ups", () => {
     assert.deepEqual(wrong.data.topup.verifyReasons, ["AMOUNT_MISMATCH"]);
     answer = { kind: "OK", slip: good({ receiverAccountMasked: "xxx-x-x1234-x" }) };
     const elsewhere = await topup(manager, "STANDARD", 500);
-    assert.deepEqual(elsewhere.data.topup.verifyReasons, ["RECEIVER_MISMATCH"]);
+    assert.deepEqual(elsewhere.data.topup.verifyReasons, ["RECEIVER_MISMATCH", "receiver:KBANK · xxx-x-x1234-x"], "what EasySlip read is kept for Super Admin");
     const reused = (auto.data.topup.transactionRef)!;
     answer = { kind: "OK", slip: good({ transactionRef: reused }) };
     const twice = await topup(manager, "STANDARD", 500);

@@ -75,6 +75,10 @@ describe("slip checks (pure)", () => {
     assert.equal(evaluateSlip(goodSlip({ receiverAccountMasked: "xxx-x-x1234-x" }), expect), "RECEIVER_MISMATCH");
     assert.equal(evaluateSlip(goodSlip({ receiverAccountMasked: null, receiverProxyMasked: "xxx-xxx-5678" }), expect), null, "PromptPay proxy");
     assert.equal(evaluateSlip(goodSlip({ receiverAccountMasked: null, receiverProxyMasked: null }), expect), "RECEIVER_UNCONFIRMED");
+    // The bank may print a Thai mobile PromptPay number with the country code.
+    assert.equal(evaluateSlip(goodSlip({ receiverAccountMasked: null, receiverProxyMasked: "+66-81-xxx-5678" }), expect), null, "+66 PromptPay");
+    assert.equal(evaluateSlip(goodSlip({ receiverAccountMasked: null, receiverProxyMasked: "66812xx5678" }), expect), null, "66 PromptPay");
+    assert.equal(evaluateSlip(goodSlip({ receiverAccountMasked: null, receiverProxyMasked: "+66-89-xxx-5678" }), expect), "RECEIVER_MISMATCH", "another number");
     assert.equal(evaluateSlip(goodSlip(), { ...expect, transactionAlreadyUsed: true }), "DUPLICATE_TRANSACTION");
   });
 

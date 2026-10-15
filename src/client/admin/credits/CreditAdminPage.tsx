@@ -3,6 +3,7 @@ import {
   CREDIT_PLANS, type CreditLedgerEntryDto, type CreditPlan, type CreditRecipientDto, type CreditSettingsDto, type CreditSettingsInput,
   type CreditSummaryDto, type CreditTopupDto, type Page,
 } from "../../../shared/credit-types.ts";
+import { fill } from "../../../shared/i18n/admin-credit-messages.ts";
 import { apiGet, apiRequest } from "../../api/client.ts";
 import { uploadImage } from "../../media/prepareImage.ts";
 import { Link } from "../../router/Router.tsx";
@@ -121,7 +122,10 @@ function RequestsTab() {
                   <td className="adm-num">{n(x.amountRequested)}{x.amountCredited !== null && x.amountCredited !== x.amountRequested && <div className="adm-small adm-muted">→ {n(x.amountCredited)}</div>}</td>
                   <td className="adm-small">
                     {x.verifyResult ? m.verify[x.verifyResult] : "—"}
-                    {x.verifyReasons.length > 0 && <div className="adm-muted">{x.verifyReasons.map((r) => (m.reasons as Record<string, string>)[r] ?? r).join(", ")}</div>}
+                    {x.verifyReasons.some((r) => !r.startsWith("receiver:")) && <div className="adm-muted">{x.verifyReasons.filter((r) => !r.startsWith("receiver:")).map((r) => (m.reasons as Record<string, string>)[r] ?? r).join(", ")}</div>}
+                    {x.verifyReasons.filter((r) => r.startsWith("receiver:")).map((r) => (
+                      <div key={r} className="adm-muted adm-mono">{fill(m.reasons.RECEIVER_READ, { value: r.slice("receiver:".length) })}</div>
+                    ))}
                     {x.verifiedAmount !== null && <div className="adm-muted">{n(x.verifiedAmount)}</div>}
                   </td>
                   <td>

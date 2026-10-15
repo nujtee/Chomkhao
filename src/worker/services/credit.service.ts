@@ -11,7 +11,7 @@ import type { CreditAccountRow, CreditRepository, CreditSettingsRow, LedgerRow, 
 import type { MediaRepository } from "../repositories/media.repository.ts";
 import { isMissingSchema } from "../repositories/inventory.repository.ts";
 import { newId } from "../security/tokens.ts";
-import { evaluateSlip, type SlipVerifier } from "../slip/slip-verifier.ts";
+import { evaluateSlip, receiverSummary, type SlipVerifier } from "../slip/slip-verifier.ts";
 import { addMs, iso, type AuthContext, type Clock, type RequestMeta } from "./auth-context.ts";
 import type { AuthorizationService } from "./authorization.service.ts";
 import { publicMediaUrl } from "./media-url.ts";
@@ -234,7 +234,9 @@ export class CreditService {
         transactionAlreadyUsed: used,
       });
       const credited = Math.floor(slip.amountSatang / 100);
-      const reasons = failure ? [failure] : [];
+      // A refused destination: keep what EasySlip read so Super Admin can see why ("receiver:" entry).
+      const read = failure === "RECEIVER_MISMATCH" || failure === "RECEIVER_UNCONFIRMED" ? receiverSummary(slip) : null;
+      const reasons = failure ? [failure, ...(read ? [`receiver:${read}`] : [])] : [];
       // A reference already taken stays off this row (the unique index would refuse it); the reason says why.
       await this.repo.recordVerificationStatement(topupId, {
         result: failure ? "FAILED" : "PASSED", reasons, amount: credited, ref: used ? null : slip.transactionRef, now,

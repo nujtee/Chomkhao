@@ -59,7 +59,7 @@ export function evaluateSlip(slip: VerifiedSlip, expect: SlipExpectation): Failu
   if (!Number.isFinite(at)
     || at < Date.parse(expect.notBefore) - DATE_TOLERANCE_MS.before
     || at > Date.parse(expect.now) + DATE_TOLERANCE_MS.after) return "DATE_OUT_OF_RANGE";
-  const targets = [expect.accountNumber, expect.promptpayNumber].filter((x): x is string => !!x);
+  const targets = [expect.accountNumber, expect.promptpayNumber].filter((x): x is string => !!x).flatMap(withCountryCode);
   const candidates = [slip.receiverAccountMasked, slip.receiverProxyMasked].filter((x): x is string => !!x);
   if (!candidates.length) return "RECEIVER_UNCONFIRMED";
   let comparable = false;
@@ -71,6 +71,21 @@ export function evaluateSlip(slip: VerifiedSlip, expect: SlipExpectation): Failu
     }
   }
   return comparable ? "RECEIVER_MISMATCH" : "RECEIVER_UNCONFIRMED";
+}
+
+/**
+ * A Thai mobile PromptPay number (0XXXXXXXXX) can come back from the bank as 66XXXXXXXXX / +66-XX-…:
+ * both spellings are compared.
+ */
+function withCountryCode(n: string): string[] {
+  const d = n.replace(/\D/g, "");
+  return /^0\d{9}$/.test(d) ? [n, `66${d.slice(1)}`] : [n];
+}
+
+/** What the provider read as the destination (bank · account · PromptPay), for staff to compare by eye. */
+export function receiverSummary(slip: VerifiedSlip): string | null {
+  const parts = [slip.receiverBank, slip.receiverAccountMasked, slip.receiverProxyMasked].filter((x): x is string => !!x);
+  return parts.length ? parts.join(" · ").slice(0, 160) : null;
 }
 
 /**
