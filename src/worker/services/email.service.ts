@@ -21,6 +21,8 @@ import type { AuthorizationService } from "./authorization.service.ts";
 import type { OutboxLike } from "./marketing.service.ts";
 import { REVIEW_DELAY_MS, RETRY_DELAYS_MIN, type SiteInfo } from "./notification.service.ts";
 import type { SecurityLogService } from "./security-log.service.ts";
+import type { CreditRepository } from "../repositories/credit.repository.ts";
+import { CREDIT_NOTICE_TYPES, creditNoticePath, renderCreditNotice } from "../credit/credit-notices.ts";
 
 const LEASE_MS = 2 * 60_000;
 /** Older than this and still not sent: no longer useful. */
@@ -112,6 +114,8 @@ export class EmailService {
     private readonly log: SecurityLogService,
     private readonly clock: Clock,
     private readonly config: EmailConfig,
+    /** App-usage credit notices (migration 0027). */
+    private readonly credits: CreditRepository | null = null,
   ) {}
 
   private get client(): EmailSender | null {
@@ -350,6 +354,17 @@ export class EmailService {
       if (flag && r[flag] !== 1) return { skip: "RECIPIENT_OPTED_OUT" };
       return { to: r.email, lang: r.language_code, name: r.name };
     }
+    // Credit notices (migration 0027): a back-office user's account address, or Super Admin's notice address.
+    if (row.recipient.startsWith("user:")) {
+      const u = this.credits ? await this.credits.userContact(row.recipient.slice(5)) : null;
+      if (!u || !SIMPLE_EMAIL.test(u.email)) return { skip: "RECIPIENT_INACTIVE" };
+      return { to: u.email, lang: row.language_code ?? u.preferred_language ?? "th", name: u.display_name };
+    }
+    if (row.recipient === "credit-admin") {
+      const to = this.credits ? (await this.credits.settings())?.notify_email ?? null : null;
+      if (!to || !SIMPLE_EMAIL.test(to)) return { skip: "RECIPIENT_INACTIVE" };
+      return { to, lang: row.language_code ?? "th", name: null };
+    }
     if (row.recipient.startsWith("guest:")) {
       if (settings.guest_enabled !== 1) return { skip: "GUEST_DISABLED" };
       const contact = await this.repo.guestContact(row.recipient.slice(6));
@@ -388,6 +403,17 @@ export class EmailService {
     const lookup = (code: string) => this.link(lang, (l) => `${bookingLookupPath(l)}?code=${encodeURIComponent(code)}`);
     const SOLD = new Set(["CONFIRMED", "CHECKED_IN", "CHECKED_OUT", "NO_SHOW"]);
 
+    if (CREDIT_NOTICE_TYPES.has(row.notification_type)) {
+      if (!this.credits) return { skip: "NOT_RELEVANT" };
+      const m = await renderCreditNotice(this.credits, row.notification_type, payload, lang);
+      if ("skip" in m) return m;
+      return renderEmail({ lang, subject: m.subject, title: m.title, body: m.body, siteName: site.name,
+        button: (() => {
+          const url = this.link(lang, (l) => `/${l.path}/admin/${creditNoticePath(m)}`);
+          return url ? { label: m.linkLabel, url } : null;
+        })() });
+    }
+
     switch (row.notification_type as EmailType) {
       case "NEW_BOOKING":
         if (!b) return { skip: "NOT_RELEVANT" };
@@ -414,11 +440,13 @@ export class EmailService {
       }
       case "GUEST_BOOKING_CREATED": {
         if (!b || b.bookingStatus !== "PENDING") return { skip: "NOT_RELEVANT" };
+        const fee = await this.lineRepo.bookingAppFee(row.booking_id!);
         const body = [
           fillText(e.createdIntro, { name: b.customerName }),
           "",
           f.bookingBlock(b, { customer: false }),
           "",
+          ...(fee ? [`${fillText(e.appFee, { n: fee.units })}: ${f.money(fee.totalSatang)}`] : []),
           `${e.amountDue}: ${f.money(b.totalSatang)}`,
           ...(b.expiresAt ? [fillText(e.payBy, { time: f.dateTime(b.expiresAt) })] : []),
           "",

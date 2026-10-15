@@ -19,6 +19,7 @@ import { addMs, iso, type AuthContext, type Clock, type RequestMeta } from "./au
 import type { AuthorizationService } from "./authorization.service.ts";
 import type { NotificationService } from "./notification.service.ts";
 import type { SecurityLogService } from "./security-log.service.ts";
+import type { MyLineCodeDto, MyLineDto } from "../../shared/credit-types.ts";
 
 export const WEBHOOK_MAX_BYTES = 256 * 1024;
 export const GUEST_CODES_PER_DAY = 5;
@@ -278,6 +279,50 @@ export class LineService {
     return { status: row.expires_at <= iso(this.clock()) ? "EXPIRED" : "PENDING", recipient: null };
   }
 
+  // ================================================================ My account → LINE (migration 0027)
+
+  /** The signed-in user's own LINE link (credit notices reach it). */
+  async myLine(actor: AuthContext): Promise<MyLineDto> {
+    const [link, s] = await Promise.all([this.repo.userLine(actor.userId), this.repo.settings()]);
+    return {
+      linked: link !== null, linkedAt: link?.linked_at ?? null,
+      available: s?.enabled === 1 && this.notifications.tokenConfigured && !!this.config.secret && !!s?.bot_basic_id,
+    };
+  }
+
+  async createMyLinkCode(actor: AuthContext, language: LocaleCode, meta: RequestMeta): Promise<MyLineCodeDto> {
+    const s = await this.repo.settings();
+    if (!this.config.secret) throw new ConflictError("LINE_CHANNEL_SECRET is not set (needed for the webhook)", "LINE_SECRET_MISSING");
+    if (s?.enabled !== 1) throw new ConflictError("LINE notifications are switched off", "LINE_DISABLED");
+    const now = this.clock();
+    if ((await this.log.countRecent(["LINE_OWN_CODE_CREATED"], 60 * 60_000, { userId: actor.userId })) >= TESTS_PER_HOUR) throw new TooManyRequestsError(15 * 60);
+    const code = newLinkCode();
+    const id = newId();
+    const expiresAt = iso(addMs(now, LINK_CODE_TTL_MINUTES * 60_000));
+    await this.db.batch([
+      this.repo.insertUserLinkCodeStatement({ id, hash: await hashCode(code), userId: actor.userId, name: actor.displayName.slice(0, 80) || "User", language, expiresAt, now: iso(now) }),
+      this.log.eventStatement("LINE_OWN_CODE_CREATED", "INFO", meta, { userId: actor.userId }),
+    ]);
+    const dto = await this.settingsDto();
+    const message = `LINK ${code}`;
+    return { id, code, message, expiresAt, addFriendUrl: dto.addFriendUrl, url: dto.bot.basicId ? oaMessageUrl(dto.bot.basicId, message) : null };
+  }
+
+  async myLinkStatus(actor: AuthContext, id: string): Promise<{ status: "PENDING" | "LINKED" | "EXPIRED" }> {
+    const row = await this.repo.linkCode(id);
+    if (!row || row.user_id !== actor.userId) throw new NotFoundError("Code not found", "LINE_CODE_NOT_FOUND");
+    if (row.used_at) return { status: "LINKED" };
+    return { status: row.expires_at <= iso(this.clock()) ? "EXPIRED" : "PENDING" };
+  }
+
+  async unlinkMyLine(actor: AuthContext, meta: RequestMeta): Promise<MyLineDto> {
+    await this.db.batch([
+      this.repo.deleteUserLineStatement(actor.userId),
+      this.log.auditStatement(actor.userId, "UNLINK_OWN_LINE", "line", actor.userId, null, null, meta),
+    ]);
+    return this.myLine(actor);
+  }
+
   // ================================================================ notification log
 
   private async logDto(id: string): Promise<NotificationLogDto> {
@@ -413,7 +458,7 @@ export class LineService {
     if (e.type === "unfollow" || e.type === "leave") {
       await this.db.batch([
         this.repo.deactivateTargetStatement(target, now),
-        ...(e.type === "unfollow" ? [this.repo.deleteGuestLinksOfUserStatement(target)] : []),
+        ...(e.type === "unfollow" ? [this.repo.deleteGuestLinksOfUserStatement(target), this.repo.deleteUserLinksOfLineUserStatement(target)] : []),
       ]);
       return true;
     }
@@ -426,6 +471,20 @@ export class LineService {
     if (!row || row.used_at || row.expires_at <= now) {
       if (!(row?.used_at && e.deliveryContext?.isRedelivery)) await this.reply(e.replyToken, INVALID_CODE_REPLY);
       return false;
+    }
+
+    // "My account → LINE" (migration 0027): this back-office user's own LINE, one-to-one chat only.
+    if (row.purpose === "STAFF" && row.user_id) {
+      const f = new LineFormatter(row.language_code);
+      if (src.type !== "user" || !LINE_USER_PATTERN.test(target)) {
+        await this.reply(e.replyToken, f.t.guestOneToOne);
+        return false;
+      }
+      const results = await this.db.batch(this.repo.userLinkStatements(row.id, row.user_id, target, now));
+      if (!results[0]?.results.length) return false;
+      await this.log.auditStatement(row.user_id, "LINK_OWN_LINE", "line", row.user_id, null, { via: "CODE" }, meta).run();
+      await this.reply(e.replyToken, staffLinkedText(f, row.recipient_name ?? "", await this.config.siteName(row.language_code)));
+      return true;
     }
 
     if (row.purpose === "STAFF") {

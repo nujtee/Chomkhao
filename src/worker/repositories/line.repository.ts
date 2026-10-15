@@ -44,6 +44,8 @@ export interface LinkCodeRow {
   expires_at: string;
   used_at: string | null;
   recipient_id: string | null;
+  /** Migration 0027: a code that links this back-office user's own LINE (credit notices). */
+  user_id?: string | null;
 }
 
 export interface NotificationRow {
@@ -194,6 +196,43 @@ export class LineRepository {
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)`,
       )
       .bind(c.id, c.hash, c.purpose, c.bookingId, c.name, c.language, c.actorId, c.expiresAt, c.now);
+  }
+
+  /** "My account → LINE" (migration 0027): a STAFF code that links the user's own LINE instead of a staff chat. */
+  insertUserLinkCodeStatement(c: { id: string; hash: string; userId: string; name: string; language: string; expiresAt: string; now: string }): D1PreparedStatementLike {
+    return this.db
+      .prepare(
+        `INSERT INTO line_link_codes (id, code_hash, purpose, booking_id, recipient_name, language_code, created_by, expires_at, created_at, user_id)
+         VALUES (?1, ?2, 'STAFF', NULL, ?4, ?5, ?3, ?6, ?7, ?3)`,
+      )
+      .bind(c.id, c.hash, c.userId, c.name, c.language, c.expiresAt, c.now);
+  }
+
+  /** Redeem the user's code (single use) and link their LINE, in one batch; the link only if THIS batch redeemed. */
+  userLinkStatements(codeId: string, userId: string, lineUserId: string, now: string): D1PreparedStatementLike[] {
+    return [
+      this.db.prepare("UPDATE line_link_codes SET used_at = ?2 WHERE id = ?1 AND used_at IS NULL AND expires_at > ?2 RETURNING id").bind(codeId, now),
+      this.db
+        .prepare(
+          `INSERT INTO user_line_links (user_id, line_user_id, linked_at)
+           SELECT ?1, ?2, ?3 WHERE EXISTS (SELECT 1 FROM line_link_codes WHERE id = ?4 AND used_at = ?3)
+           ON CONFLICT (user_id) DO UPDATE SET line_user_id = excluded.line_user_id, linked_at = excluded.linked_at`,
+        )
+        .bind(userId, lineUserId, now, codeId),
+    ];
+  }
+
+  userLine(userId: string): Promise<{ line_user_id: string; linked_at: string } | null> {
+    return this.db.prepare("SELECT line_user_id, linked_at FROM user_line_links WHERE user_id = ?1").bind(userId).first();
+  }
+
+  deleteUserLineStatement(userId: string): D1PreparedStatementLike {
+    return this.db.prepare("DELETE FROM user_line_links WHERE user_id = ?1").bind(userId);
+  }
+
+  /** Blocked the OA: every user link of that LINE account goes. */
+  deleteUserLinksOfLineUserStatement(lineUserId: string): D1PreparedStatementLike {
+    return this.db.prepare("DELETE FROM user_line_links WHERE line_user_id = ?1").bind(lineUserId);
   }
 
   linkCodeByHash(hash: string): Promise<LinkCodeRow | null> {
@@ -520,6 +559,15 @@ export class LineRepository {
   }
 
   // ------------------------------------------------------------------ message data
+
+  /** The app usage fee on a booking (none before migration 0027). */
+  async bookingAppFee(bookingId: string): Promise<{ units: number; totalSatang: number } | null> {
+    return withFallback(async () => {
+      const r = await this.db.prepare("SELECT app_fee_units, app_fee_satang FROM bookings WHERE id = ?1")
+        .bind(bookingId).first<{ app_fee_units: number; app_fee_satang: number }>();
+      return r && r.app_fee_satang > 0 ? { units: r.app_fee_units, totalSatang: r.app_fee_satang } : null;
+    }, async () => null);
+  }
 
   /** Bookings with their stay and food lines, for message texts (category names in `lang`). */
   async messageBookings(ids: string[], lang: string): Promise<MsgBooking[]> {

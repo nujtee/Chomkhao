@@ -69,6 +69,8 @@ import { createPaypalApi, paypalEnvironment, type FetchLike as PaypalFetch } fro
 import { PaypalService } from "./services/paypal.service.ts";
 import { createEmailSender } from "./email/provider.ts";
 import type { FetchLike as EmailFetch } from "./email/sender.ts";
+import { CreditRepository } from "./repositories/credit.repository.ts";
+import { CreditService } from "./services/credit.service.ts";
 
 /**
  * Composition root: wires repositories into services per request.
@@ -116,6 +118,8 @@ export interface Services {
   paypal: PaypalService;
   /** Administration → Menu: sidebar items hidden for everyone (migration 0024). */
   adminMenu: AdminMenuService;
+  /** App-usage credits: balance, top-ups, plan, notices (migration 0027). */
+  credits: CreditService;
 }
 
 export interface ServiceOptions {
@@ -192,7 +196,24 @@ export function createServices(env: Env, options: ServiceOptions): Services {
   const fontRepo = new FontRepository(db);
   // Responsive image renditions (Phase 12).
   const images = new ImageResolver(db, env.PUBLIC_MEDIA_BASE_URL);
-  const quotes = new QuoteService(pricing, units, inventory, availability, clock, images, env.PUBLIC_MEDIA_BASE_URL);
+  // App-usage credits (migration 0027): the fee per unit on every quote / booking, top-ups, notices.
+  const creditRepo = new CreditRepository(db);
+  const verifier = options.slipVerifier !== undefined ? options.slipVerifier : createSlipVerifier(env);
+  const emailRepoForCredits = new EmailRepository(db);
+  const emailSender = createEmailSender(env, options.emailFetch);
+  const credits = new CreditService(db, creditRepo, mediaRepo, env.MEDIA_PRIVATE, verifier, authorization, log, clock, {
+    mediaBaseUrl: env.PUBLIC_MEDIA_BASE_URL,
+    timezone: () => inventory.siteTimezone(),
+    emailReady: async () => {
+      const s = await emailRepoForCredits.settings().catch(() => null);
+      return emailSender !== null && s?.enabled === 1 && !!s.from_email;
+    },
+    lineReady: async () => {
+      const s = await new LineRepository(db).settings().catch(() => null);
+      return !!env.LINE_CHANNEL_ACCESS_TOKEN?.trim() && s?.enabled === 1;
+    },
+  });
+  const quotes = new QuoteService(pricing, units, inventory, availability, clock, images, env.PUBLIC_MEDIA_BASE_URL, () => credits.feeTerms());
 
   // LINE (Phase 11): outbox rows are written inside the payment / slip / cancel batches.
   const site = new SiteService(new D1SiteSettingsRepository(db), env.PUBLIC_MEDIA_BASE_URL);
@@ -211,6 +232,7 @@ export function createServices(env: Env, options: ServiceOptions): Services {
     db, lineRepo, new ReportRepository(db), siteInfo,
     () => inventory.siteTimezone(), clock,
     { token: env.LINE_CHANNEL_ACCESS_TOKEN?.trim() || null, fetch: options.lineFetch, linkBase: configuredBaseUrl(env) },
+    creditRepo,
   );
   let bookingsRef: BookingService | null = null;
   const line = new LineService(db, lineRepo, notifications, { guestBooking: (c, p, m) => bookingsRef!.guestBooking(c, p, m) },
@@ -225,7 +247,6 @@ export function createServices(env: Env, options: ServiceOptions): Services {
   const bookings = new BookingService(db, bookingRepo, quotes, authorization, log, clock, paymentRepo, env.PUBLIC_MEDIA_BASE_URL,
     outbox, (row) => line.guestStatus(row), marketingRepo, paypalApi !== null);
   bookingsRef = bookings;
-  const verifier = options.slipVerifier !== undefined ? options.slipVerifier : createSlipVerifier(env);
   const accommodation = new AccommodationService(db, units, inventory, mediaRepo, env.MEDIA_PUBLIC, authorization, log, env.PUBLIC_MEDIA_BASE_URL, clock, images);
   const content = new PublicContentService(db, clock, env.PUBLIC_MEDIA_BASE_URL, images);
   const privacy = new PrivacyService(db, authorization, log, clock);
@@ -260,8 +281,9 @@ export function createServices(env: Env, options: ServiceOptions): Services {
       siteName: async (lang) => (await publicSite(lang)).siteName,
     }),
     email: new EmailService(db, emailRepo, lineRepo, authorization, log, clock, {
-      sender: createEmailSender(env, options.emailFetch), linkBase: configuredBaseUrl(env), siteInfo,
-    }),
+      sender: emailSender, linkBase: configuredBaseUrl(env), siteInfo,
+    }, creditRepo),
+    credits,
     pricingRules: new PricingRuleService(db, pricing, units, authorization, log, clock),
     dashboard: new DashboardService(new DashboardRepository(db), inventory, authorization, clock, (from, to) => ga4.dashboard(from, to)),
     cms: new CmsService(db, authorization, log, clock, env.PUBLIC_MEDIA_BASE_URL),

@@ -7,7 +7,7 @@ import { hasPermission, setPermissions } from "../../src/client/admin/pages/Menu
 import { Harness } from "../helpers/harness.ts";
 
 /** Permissions on purpose not tied to one menu: they stay in the "Advanced" list. */
-const NOT_A_MENU = ["content.view", "notifications.view", "bookings.create", "bookings.export"];
+const NOT_A_MENU = ["content.view", "notifications.view", "bookings.create", "bookings.export", "credits.view"];
 
 describe("menu access map (shared/admin-menu.ts)", () => {
   it("covers every sidebar item, and 'see' is the permission the sidebar shows it by", () => {

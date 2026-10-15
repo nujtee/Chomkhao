@@ -6,14 +6,17 @@ import type { PermissionCode } from "./auth-types.ts";
  * the Worker accepts nothing else. Hiding changes the menu only: permissions still decide access.
  */
 
-/** Never hidden: the dashboard (start page) and this page, so the menu can always be restored. */
-export const ADMIN_MENU_LOCKED = ["", "admin-menu"] as const;
+/**
+ * Never hidden: the dashboard (start page) and this page, so the menu can always be restored; and the credit pages
+ * (migration 0027) — the property must always be able to top up, and Super Admin to manage credits.
+ */
+export const ADMIN_MENU_LOCKED = ["", "admin-menu", "credit-topup", "credit-admin"] as const;
 
 export const ADMIN_MENU_PATHS = [
   "", "bookings", "calendar",
   "houses", "vip-tents", "camping", "pricing",
   "food", "food-orders", "kitchen",
-  "payments", "slips", "receiving-accounts", "payment-settings",
+  "payments", "slips", "receiving-accounts", "payment-settings", "credit-topup", "credit-admin",
   "reports",
   "content-home", "content-gallery", "content-history", "seo",
   "ga4", "meta-pixel", "capi",
@@ -48,6 +51,8 @@ export const MENU_ACCESS: Record<AdminMenuPath, { view: PermissionCode; manage: 
   slips: { view: "slips.view", manage: ["payments.verify"] },
   "receiving-accounts": { view: "receiving_accounts.view", manage: ["receiving_accounts.edit"] },
   "payment-settings": { view: "receiving_accounts.view", manage: ["receiving_accounts.edit"] },
+  "credit-topup": { view: "credits.topup", manage: [] },
+  "credit-admin": { view: "credits.manage", manage: [] },
   reports: { view: "reports.view", manage: ["reports.export"] },
   "content-home": { view: "content.home", manage: ["content.publish"] },
   "content-gallery": { view: "content.gallery", manage: ["content.publish"] },

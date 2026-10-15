@@ -15,6 +15,10 @@ export const EMAIL_TYPES = [
   "GUEST_PAYMENT_REJECTED", // guest: payment not accepted (reason) — pay again
   "GUEST_CANCELLED", // guest: booking cancelled (reason)
   "TEST", // staff: test message from the admin
+  "CREDIT_LOW", // back-office users: app-usage credits below the low threshold (once a day)
+  "CREDIT_EMPTY", // back-office users: not enough credit for one unit — online booking closed (twice a day)
+  "CREDIT_TOPUP_REQUEST", // Super Admin: a top-up waits for approval
+  "CREDIT_TOPUP_RESULT", // the user who asked: top-up approved / rejected
 ] as const;
 export type EmailType = (typeof EMAIL_TYPES)[number];
 

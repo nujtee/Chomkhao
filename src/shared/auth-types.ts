@@ -22,6 +22,7 @@ export const PERMISSION_CODES = [
   "users.reset_password", "users.suspend", "users.force_logout", "users.restore",
   "roles.view", "security_events.view", "audit_logs.view", "notifications.view",
   "system.view",
+  "credits.view", "credits.topup", "credits.manage",
 ] as const;
 
 export type PermissionCode = (typeof PERMISSION_CODES)[number];

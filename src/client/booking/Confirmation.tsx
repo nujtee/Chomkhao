@@ -9,6 +9,7 @@ import { PaymentInstructions } from "./PaymentInstructions.tsx";
 import { BookingSummary, useDateTimeText } from "./Summary.tsx";
 import { useBookingT } from "./useBookingT.ts";
 import { LineUpdates } from "./LineUpdates.tsx";
+import { GuestBillButton } from "./Bill.tsx";
 import { paymentSubmittedEvent, useConfirmedBookingEvent } from "../analytics/booking-events.ts";
 
 export function StatusPill({ status }: { status: PublicBookingDto["status"] }) {
@@ -82,6 +83,7 @@ export function Confirmation({
       <LineUpdates booking={booking} phone={phone} onChange={setBooking} />
 
       <BookingSummary quote={booking} />
+      <GuestBillButton booking={booking} />
 
       <div className="flow-nav">
         <Link to={bookingLookupPath(locale)} className="button button--secondary">{bt.checkBooking}</Link>

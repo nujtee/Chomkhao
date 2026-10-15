@@ -28,6 +28,7 @@
 | 14 | Security & Marketing (cookie consent + privacy policy page, GA4 + Meta Pixel gated by consent, Meta Conversions API outbox with event_id dedup, GA4 Data API dashboard numbers, request rate limits, CSP per tracker, audit, accessibility audit) | ✅ Done |
 | 15 | Testing (coverage matrix of the 28 areas, route security matrix over every endpoint, input fuzzing, concurrent model-based simulation of inventory invariants, snapshot immutability, deploy-order safety, i18n completeness, static checks, code coverage, browser suites in the repo + responsive sweep, CI) | ✅ Done |
 | 16 | Production (monitoring: health with schema + cron heartbeat, server error log, Admin → System status with 19 readiness checks; one canonical host; preflight, release, D1 backup, post-deploy smoke test; production runbook; readiness report) | ✅ Done |
+| 17 | App-usage credits (Chomkhao): per-unit fee on every booking, credit balance with hold / capture / release, top-up requests (manual or EasySlip), Standard / Premium plan, low / empty notices by e-mail + LINE, "My account" LINE link, printable statement | ✅ Done |
 
 ### A.2 Architecture Decisions (ADR)
 
@@ -375,6 +376,42 @@ Runbook for the owner: **`docs/PRODUCTION.md`** (Thai). Readiness by spec item �
 **Go-live blockers** (preflight / System status errors until done): Workers Paid plan, `database_id`, `APP_BASE_URL`,
 `routes`, migrations applied, first SUPER_ADMIN, website name, primary receiving account.
 
+### A.21 App-usage credits (Phase 17)
+
+The property pays the platform per booked unit. Off by default (migration 0027 leaves `credit_settings.enabled = 0`): until
+Super Admin switches it on, bookings, totals and pages behave exactly as before.
+
+- **Fee.** Every booking (website and staff-made) adds `fee_per_unit × units` to the guest's bill — units = houses + VIP tents +
+  own tents. `fee_per_unit` defaults to 20 THB and is set by Super Admin. The fee is part of `subtotal_satang` / `total_satang`
+  (new CHECK: subtotal = accommodation + food + app fee), so it flows into the deposit, PayPal, slips and reports like any charge.
+  Shown as "ค่าธรรมเนียมการใช้ App (N หลัง × X)" on the quote, confirmation, lookup, admin, guest e-mail and statement.
+- **Credits.** 1 credit = 1 THB, never expire. `credit_account` (singleton) holds `balance`, `held`, `plan`. DB triggers on
+  `bookings` do the accounting for every path: AFTER INSERT holds the fee (RAISE `CREDIT_INSUFFICIENT` when
+  `balance − held` is too small → 409, the booking is refused); PENDING → CONFIRMED captures it (ledger `FEE_CAPTURE`);
+  PENDING → EXPIRED / CANCELLED releases it. Cancelling one stay of an unpaid booking lowers fee and hold; a fee can never rise.
+- **States.** OFF · NORMAL · LOW (usable < `low_threshold`, default 500) · EMPTY (usable < one unit's fee). EMPTY closes online
+  booking (`GET /api/public/bookings/status` → `{open:false}`, the booking page says "contact us"). Every admin page shows the
+  status bar for users with `credits.view`.
+- **Notices.** Cron, Bangkok time: LOW once a day at `alert_time_1` (09:00); EMPTY at `alert_time_1` and `alert_time_2` (17:00).
+  E-mail to every active back-office user; LINE only to users who linked their own LINE in **My account** (code sent from a
+  1:1 chat). Idempotency keys `CREDIT_LOW:<date>:user:<id>` / `CREDIT_EMPTY:<date>:<slot>:user:<id>`; the state is checked
+  again at send time.
+- **Top-up.** "เติมเครดิต" (`credits.topup`): choose Standard / Premium (each with a minimum set by Super Admin), amount, slip
+  (private R2, 10 MB, 10 per user per hour, slip ≤ 24 h, same slip / transaction ref never twice). Approval mode MANUAL
+  (Super Admin approves — amount can be corrected — or rejects) or EASYSLIP (`evaluateSlip`: receiver, amount, date, duplicate;
+  approved at once, otherwise waits with the reason). Super Admin is told by e-mail (`notify_email`) and LINE.
+- **Plan.** Site-wide, set by the latest approved top-up; Premium stays (even at zero credit) until a later top-up is Standard.
+  While credits are on and the plan is STANDARD, `reports.*`, `marketing.*` and `settings.theme` are removed from everyone but
+  SUPER_ADMIN in `rbac.repository` (menu, routes and services all follow).
+- **"จัดการเติมเครดิต"** (`credits.manage`): SUPER_ADMIN only — enforced by DB triggers on `role_permissions` /
+  `user_permissions`, the user-management service and the effective-permission SQL. Tabs: requests, balance (add / deduct
+  with a note — never below what is held — and set plan), settings (on/off, fee, threshold, mode, minimums, account, PromptPay,
+  QR, e-mail, alert times), notices.
+- **Statement.** "ดูบิล / บันทึกเป็น PDF" on confirmation, lookup (code + phone) and admin booking detail: A4 ใบแจ้งยอด
+  (explicitly not a tax invoice) printed with the browser's dialog.
+- **Deploy order.** The code runs before 0027 is applied (fallback reads; the fee columns are written only when a fee exists;
+  credits read as OFF). Migration 0027 rebuilds `bookings` (DESTRUCTIVE, announced) and re-creates every trigger it dropped.
+
 ### A.6 Verification notes (Phase 1–16)
 
 - Workspace had no npm registry access; `package-lock.json` must be generated on first `npm install`.
@@ -392,6 +429,7 @@ Runbook for the owner: **`docs/PRODUCTION.md`** (Thai). Readiness by spec item �
 - Phase 15: 523 tests pass (54 new: route security matrix 18 — all 150 routes from the router (119 admin), ~6,000 requests; business invariants 4 — simulation + snapshots; i18n completeness 13; coverage gaps 19 incl. 10 deploy-order prefixes); coverage of `src/` by these tests: 88.4 % lines, 87.3 % branches, 92.8 % functions (Worker 92.5 % lines / 97.5 % functions; most uncovered "lines" are type declarations; the client is covered mainly by the browser suites); worker (`--noUnusedLocals --noUnusedParameters --noImplicitReturns`), client (React type shim) and test typecheck clean; static checks clean (35 reviewed SQL fragments, 64 uses); browser suites moved into the repo and run through `npm run test:e2e`: Phase 9 (20), 10 (9), 11 (12), 12 (16), 13 (10), 14 (31) and the new responsive sweep (12) — 110/110, zero console / CSP errors. Found and fixed: **44 admin endpoints read and validated the request before checking the permission** (an account without access got 422 / 415 with field details instead of 403; nothing was ever changed) — now a route-level permission gate runs first and the services still check the exact permission; admin text-style buttons ("Sign out") were 23 px high (WCAG 2.2 target size) → 24 px minimum; the report chart's 31 daily axis labels overlapped on phones → short labels, at most ~8; the dev-only reset-link log is structured JSON. Not run: ESLint, `vite build` and real `@types/react` (registry offline; client bundled with esbuild for the browser suites), the CI workflow itself, real Cloudflare D1 (concurrency is simulated in SQLite with D1's batch semantics; D1 serialises writes per database).
 - Phase 16: 554 tests pass (31 new: monitoring 15 — heartbeat per cron run, stale cron → 503 and recovery, a failing task does not stop the others and is logged, retention, API 500 logged without query / PII, 4xx not logged, error-storm cap, degraded page logged, safe before migration 0020, `system.view` for SUPER_ADMIN / MANAGER / overrides only, readiness checks with secrets never in the response, configured site all green; preflight / backup / smoke scripts 12 — the repository config fails exactly on the three owner values, 15 risky-config cases, migrations, secret files in Git, `wrangler secret list` parsing, smoke test against the real app in production mode incl. sign-in + sign-out and five classic deploy mistakes; canonical host 2; deploy-order prefix 0020; new dictionary in the i18n completeness test). Coverage (`npm run test:coverage`): 97.6 % lines, 88.0 % branches, 93.6 % functions (Worker 99.0 % lines) — this Node run no longer reports type-only lines as uncovered, so compare branches / functions with Phase 15 (87.3 % / 92.8 %). Worker, client (React type shim) and test + scripts typecheck clean; static checks clean. Browser suites 120/120: Phases 9 (20), 10 (9), 11 (12), 12 (16), 13 (10), 14 (31), the new Phase 16 suite (10: health before / after the first cron, `npm run smoke` against a production-mode server with 0 errors, System status in three languages, accessibility + focus, mobile, viewer refused, production robots / indexing) and responsive (12); zero console / CSP errors. Found and fixed: an error in the hold-expiry or camping-drift step of the cron stopped the search / CAPI / LINE steps after it (every step is now isolated, logged and reported in the heartbeat); `/api/health` only pinged the database (now also schema version and cron freshness); the apex / `workers.dev` host served a duplicate site (now 301 to `APP_BASE_URL`); stale CSP comment in `public/_headers`; System status check names used the column-header style and the value column was cut off on phones (seen on screenshots). Not run here: a real deploy and the `wrangler` commands (`d1 create`, `migrations apply --remote`, `d1 export`, `secret list`) — no Cloudflare account or network access; ESLint, `vite build`, real `@types/react` (registry offline); real LINE / Meta / Google APIs (fakes only).
 
+- Phase 17: 715 tests pass (20 new: credit state, admin permissions before 0027, fee off by default, hold → capture, release on expiry / cancel, 409 + DB trigger, one-stay cancel, deposit, guest e-mail fee line, SUPER_ADMIN-only rules, manual and EasySlip top-ups, duplicates, adjustments, plan lock, low / empty notices, My account LINE; client: fee line + statement; dictionary parity incl. the new credit dictionary); worker + client typecheck, ESLint and static checks clean. Not run: browser suites, real EasySlip / LINE / e-mail delivery.
 ---
 
 ## B. Original Specification (verbatim)

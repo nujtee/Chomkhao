@@ -75,9 +75,11 @@ export function MenuAccessEditor({ user, roles, overrides, onChange }: {
   /** Manage permissions only this item uses — the ones that go when "See" is unticked. */
   const ownManage = (item: NavItem) =>
     MENU_ACCESS[item.path as AdminMenuPath].manage.filter((c) => !allItems.some((o) => o.path !== item.path && codesOf(o.path).includes(c)));
+  // Credit management (migration 0027) belongs to the SUPER_ADMIN role alone: never handed out per user.
+  const grantable = (item: NavItem) => item.permission !== "credits.manage";
   const groups = [
-    { id: "top", label: u.topLevel, items: ADMIN_NAV.filter((g) => !g.label).flatMap((g) => g.items) },
-    ...ADMIN_NAV.filter((g) => g.label).map((g) => ({ id: g.id, label: g.label!(t), items: g.items })),
+    { id: "top", label: u.topLevel, items: ADMIN_NAV.filter((g) => !g.label).flatMap((g) => g.items).filter(grantable) },
+    ...ADMIN_NAV.filter((g) => g.label).map((g) => ({ id: g.id, label: g.label!(t), items: g.items.filter(grantable) })),
   ];
 
   const row = (item: NavItem) => {

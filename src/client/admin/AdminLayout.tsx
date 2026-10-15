@@ -4,6 +4,7 @@ import { adminPath, pagePath } from "../../shared/routes.ts";
 import { Link, useRouter } from "../router/Router.tsx";
 import { useAdmin } from "./AdminContext.tsx";
 import { ADMIN_NAV } from "./nav.ts";
+import { CreditStatusBar } from "./credits/creditUi.tsx";
 
 /** Expanded sidebar groups, remembered in this browser (best effort: storage may be unavailable). */
 const NAV_STORE = "pk_admin_nav_open";
@@ -80,7 +81,7 @@ export function AdminLayout({ currentPath, children }: { currentPath: string; ch
           ))}
         </nav>
         <div className="adm-topbar__user">
-          <span className="adm-topbar__name">{me?.displayName}</span>
+          <Link to={href("my-account")} className="adm-topbar__name">{me?.displayName}</Link>
           <Link to={href("change-password")} className="adm-topbar__link">{t.nav.changePassword}</Link>
           <button type="button" className="adm-topbar__link" onClick={() => void logout()}>{t.auth.logout}</button>
         </div>
@@ -142,6 +143,7 @@ export function AdminLayout({ currentPath, children }: { currentPath: string; ch
               </Link>
             ))}
           </nav>
+          <Link to={href("my-account")} className="adm-nav__link">{t.nav.myAccount}</Link>
           <Link to={href("change-password")} className="adm-nav__link">{t.nav.changePassword}</Link>
           <button type="button" className="adm-nav__link adm-nav__button" onClick={() => void logout()}>{t.auth.logout}</button>
         </div>
@@ -149,6 +151,7 @@ export function AdminLayout({ currentPath, children }: { currentPath: string; ch
       {open && <div className="adm-backdrop" onClick={() => setOpen(false)} aria-hidden="true" />}
 
       <main id="adm-main" className="adm-main" tabIndex={-1}>
+        <CreditStatusBar />
         {children}
       </main>
     </div>

@@ -10,6 +10,9 @@ import {
 import type { LineRepository, LineSettingsRow, NotificationRow, RecipientFlag } from "../repositories/line.repository.ts";
 import type { ReportRepository } from "../repositories/report.repository.ts";
 import { addMs, iso, type Clock } from "./auth-context.ts";
+import type { CreditRepository } from "../repositories/credit.repository.ts";
+import { CREDIT_NOTICE_TYPES, creditNoticePath, renderCreditNotice } from "../credit/credit-notices.ts";
+import { creditLineText } from "../credit/credit-messages.ts";
 
 /** Slip review notices wait this long so an automatic verification can settle the slip first. */
 export const REVIEW_DELAY_MS = 2 * 60_000;
@@ -105,6 +108,8 @@ export class NotificationService {
     private readonly timezone: () => Promise<string | null>,
     private readonly clock: Clock,
     private readonly config: { token: string | null; fetch?: FetchLike; linkBase: string | null },
+    /** App-usage credit notices to back-office users' own LINE (migration 0027). */
+    private readonly credits: CreditRepository | null = null,
   ) {
     this.api = config.token ? createLineApi(config.token, config.fetch) : null;
   }
@@ -149,7 +154,7 @@ export class NotificationService {
     const due = await this.repo.due(now, limit);
     if (!due.length) return summary;
     const settings = await this.repo.settings();
-    const ctx = new RenderContext(this.repo, this.reports, this.siteInfo, this.config.linkBase, settings, now);
+    const ctx = new RenderContext(this.repo, this.reports, this.siteInfo, this.config.linkBase, settings, now, this.credits);
     for (const row of due) {
       const outcome = await this.deliver(row, settings, ctx).catch((error: unknown) => {
         console.error(JSON.stringify({ level: "error", message: "notification_dispatch_failed", id: row.id, error: String(error).slice(0, 200) }));
@@ -165,7 +170,7 @@ export class NotificationService {
     const row = await this.repo.notification(id);
     if (!row) return null;
     const settings = await this.repo.settings();
-    await this.deliver(row, settings, new RenderContext(this.repo, this.reports, this.siteInfo, this.config.linkBase, settings, iso(this.clock())));
+    await this.deliver(row, settings, new RenderContext(this.repo, this.reports, this.siteInfo, this.config.linkBase, settings, iso(this.clock()), this.credits));
     return this.repo.notification(id);
   }
 
@@ -221,6 +226,12 @@ export class NotificationService {
       if (flag && r[flag] !== 1) return { skip: "RECIPIENT_OPTED_OUT" };
       return { to: r.target_id, lang: r.language_code };
     }
+    // A back-office user's own LINE (My account → LINE, migration 0027).
+    if (row.recipient.startsWith("user:")) {
+      const u = this.credits ? await this.credits.userContact(row.recipient.slice(5)) : null;
+      if (!u?.line_user_id) return { skip: "NOT_LINKED" };
+      return { to: u.line_user_id, lang: row.language_code ?? u.preferred_language ?? "th" };
+    }
     if (row.recipient.startsWith("guest:")) {
       if (settings.guest_enabled !== 1) return { skip: "GUEST_DISABLED" };
       const bookingId = row.recipient.slice(6);
@@ -243,6 +254,7 @@ class RenderContext {
     private readonly linkBase: string | null,
     private readonly settings: LineSettingsRow | null,
     private readonly now: string,
+    private readonly credits: CreditRepository | null = null,
   ) {}
 
   private site(lang: string): Promise<SiteInfo> {
@@ -274,6 +286,13 @@ class RenderContext {
     const more = (n: number) => f.fill(f.t.more, { n });
     const one = async () => (row.booking_id ? (await this.repo.messageBookings([row.booking_id], lang))[0] ?? null : null);
     const text = (t: string): Rendered => ({ messages: [{ type: "text", text: t.slice(0, 4900) }] });
+
+    if (CREDIT_NOTICE_TYPES.has(row.notification_type)) {
+      if (!this.credits) return { skip: "NOT_RELEVANT" };
+      const m = await renderCreditNotice(this.credits, row.notification_type, p, lang);
+      if ("skip" in m) return m;
+      return text(creditLineText(m, this.link(lang, (l) => `/${l.path}/admin/${creditNoticePath(m)}`)));
+    }
 
     switch (row.notification_type) {
       case "CHECKIN_DIGEST": {

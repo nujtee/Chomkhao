@@ -107,6 +107,15 @@ export function BookingSummary({ quote, headingLevel = 2 }: { quote: QuoteDto; h
             <dd>{baht(quote.foodSubtotalSatang)}</dd>
           </div>
         )}
+        {quote.appFee && quote.appFee.totalSatang > 0 && (
+          <div className="summary__line">
+            <dt>
+              {bt.appFee}
+              <small>{fill(bt.appFeeLine, { n: quote.appFee.units, price: baht(quote.appFee.perUnitSatang) })}</small>
+            </dt>
+            <dd>{baht(quote.appFee.totalSatang)}</dd>
+          </div>
+        )}
         <div className="summary__line summary__line--total">
           <dt>{bt.total}</dt>
           <dd>{baht(quote.totalSatang)}</dd>

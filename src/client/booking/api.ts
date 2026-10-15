@@ -15,6 +15,11 @@ export function fetchFoodCatalogue(checkIn: string, checkOut: string, lang: stri
   return apiGet<FoodCatalogueDto>(`/api/public/food-options?${params}`, signal);
 }
 
+/** Whether online booking is open right now (it pauses when the site's app credit runs out). */
+export function fetchBookingStatus(signal?: AbortSignal) {
+  return apiGet<{ open: boolean }>("/api/public/bookings/status", signal);
+}
+
 export function fetchQuote(body: QuoteRequest, signal?: AbortSignal) {
   return apiRequest<QuoteDto>("POST", "/api/public/bookings/quote", body, signal);
 }

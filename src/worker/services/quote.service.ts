@@ -31,6 +31,7 @@ import type { ImageResolver } from "../media/image-resolver.ts";
 import { publicMediaUrl } from "./media-url.ts";
 import { pickTranslation } from "./accommodation.service.ts";
 import type { AvailabilityService } from "./availability.service.ts";
+import type { AppFeeTerms } from "./credit.service.ts";
 
 /** One stay of the request, with its own guests (the parser fills them in for a legacy single `stay`). */
 export type StayInput =
@@ -114,6 +115,8 @@ export class QuoteService {
     /** Responsive dish photos (Phase 12). */
     private readonly images: ImageResolver | null = null,
     private readonly mediaBaseUrl: string | undefined = undefined,
+    /** App-usage fee terms (migration 0027); null / absent = no fee. */
+    private readonly appFeeTerms: (() => Promise<AppFeeTerms | null>) | null = null,
   ) {}
 
   /** Dish → public DTO (shared by the stay catalogue and the public menu). */
@@ -296,8 +299,12 @@ export class QuoteService {
     const tarp = stays.find((st) => st.tarp)?.tarp ?? null;
     const accommodationSubtotalSatang = stays.reduce((acc, st) => acc + st.item.subtotalSatang + (st.tarp?.subtotalSatang ?? 0), 0);
     const foodSubtotalSatang = foodLines.reduce((acc, l) => acc + l.dto.subtotalSatang, 0);
-    const totalSatang = accommodationSubtotalSatang + foodSubtotalSatang;
     const items = stays.map((st) => st.item);
+    // App fee (migration 0027): per house / VIP tent / own tent, on the guest's bill; paid now (part of any deposit).
+    const terms = this.appFeeTerms ? await this.appFeeTerms().catch(() => null) : null;
+    const feeUnits = items.reduce((acc, it) => acc + it.quantity, 0);
+    const appFee = terms && feeUnits > 0 ? { units: feeUnits, perUnitSatang: terms.perUnitSatang, totalSatang: feeUnits * terms.perUnitSatang } : null;
+    const totalSatang = accommodationSubtotalSatang + foodSubtotalSatang + (appFee?.totalSatang ?? 0);
     return {
       quote: {
         checkIn: input.checkIn,
@@ -317,6 +324,8 @@ export class QuoteService {
         currency: "THB",
         // Deposit plan (migration 0025), per stay: what each DEPOSIT_50 stay leaves for check-in; food is paid now.
         depositSatang: depositFor(totalSatang, items.reduce((acc, it) => acc + it.payLaterSatang, 0)),
+        appFee,
+        bookingUnavailable: appFee !== null && terms!.availableCredits * 100 < appFee.totalSatang,
       },
       nights,
       stays,

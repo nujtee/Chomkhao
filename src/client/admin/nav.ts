@@ -55,6 +55,9 @@ export const ADMIN_NAV: NavGroup[] = [
       { ready: true, path: "slips", label: (t) => t.nav.slips, permission: "slips.view" },
       { ready: true, path: "receiving-accounts", label: (t) => t.nav.receivingAccounts, permission: "receiving_accounts.view" },
       { ready: true, path: "payment-settings", label: (t) => t.nav.paymentSettings, permission: "receiving_accounts.view" },
+      // App-usage credits (migration 0027): every back-office user tops up; Super Admin alone manages.
+      { ready: true, path: "credit-topup", label: (t) => t.nav.creditTopup, permission: "credits.topup" },
+      { ready: true, path: "credit-admin", label: (t) => t.nav.creditAdmin, permission: "credits.manage" },
     ],
   },
   { id: "reports", label: null, items: [{ ready: true, path: "reports", label: (t) => t.nav.reports, permission: "reports.view" }] },

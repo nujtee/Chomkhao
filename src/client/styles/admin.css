@@ -3182,3 +3182,49 @@
   margin: 12px 0 0;
   text-align: right;
 }
+
+/* ================================================================ app-usage credits (migration 0027) */
+
+.adm-credit-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  margin: 0 0 16px;
+  padding: 8px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-surface);
+  font-size: 0.875rem;
+}
+.adm-credit-bar--low {
+  border-color: color-mix(in srgb, #b7791f 55%, var(--color-border));
+  background: color-mix(in srgb, #f6ad55 14%, var(--color-surface));
+}
+.adm-credit-bar--empty {
+  border-color: color-mix(in srgb, #c53030 60%, var(--color-border));
+  background: color-mix(in srgb, #fc8181 14%, var(--color-surface));
+}
+.adm-credit-bar__label { font-weight: 600; color: var(--color-heading); }
+.adm-credit-bar__numbers { display: inline-flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; color: var(--color-text); }
+.adm-credit-bar__link { margin-left: auto; font-weight: 600; color: var(--color-primary); }
+
+.adm-credit .adm-kpis { margin-bottom: 16px; }
+.adm-credit__tab { margin-top: 16px; }
+.adm-credit__plans { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.adm-credit__plan {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 14px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  cursor: pointer;
+}
+.adm-credit__plan span { display: grid; gap: 2px; }
+.adm-credit__plan small { color: var(--color-muted); }
+.adm-credit__plan.is-selected { border-color: var(--color-primary); box-shadow: 0 0 0 1px var(--color-primary); }
+.adm-credit__plan.is-unavailable { opacity: 0.6; cursor: not-allowed; }
+.adm-credit__pay { display: flex; flex-wrap: wrap; gap: 16px 24px; align-items: flex-start; }
+.adm-credit__qr { width: 180px; height: auto; border: 1px solid var(--color-border); border-radius: 8px; background: #fff; }
+.adm-credit__code { font-size: 1.25rem; letter-spacing: 0.06em; }

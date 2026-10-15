@@ -28,6 +28,9 @@ export interface BookingRow {
   total_satang: number;
   /** Deposit plan: amount asked online; null = full payment (migration 0025). */
   deposit_satang: number | null;
+  /** App fee (migration 0027): units charged and the fee in satang (part of the subtotal / total). */
+  app_fee_units: number;
+  app_fee_satang: number;
   currency: string;
   expires_at: string | null;
   /** When the booking was confirmed (payment in); later payments are the rest of a deposit. */
@@ -120,13 +123,16 @@ export interface BookingTarpRow {
   status: string;
 }
 
-const bookingColumns = (deposit: string) => `id, booking_code, language_code, source, check_in, check_out, nights, adults, children, customer_name,
+const bookingColumns = (deposit: string, fee: boolean) => `id, booking_code, language_code, source, check_in, check_out, nights, adults, children, customer_name,
   customer_phone, customer_phone_normalized, customer_email, customer_line_id, customer_note, booking_status, payment_status,
   accommodation_subtotal_satang, food_subtotal_satang, subtotal_satang, discount_satang, total_satang, ${deposit} AS deposit_satang, currency, expires_at,
-  confirmed_at, cancelled_at, cancel_reason, idempotency_key, privacy_accepted_at, created_at, updated_at`;
-const BOOKING_COLUMNS = bookingColumns("deposit_satang");
-/** Before migration 0025: no booking has a deposit. */
-const BOOKING_COLUMNS_LEGACY = bookingColumns("NULL");
+  confirmed_at, cancelled_at, cancel_reason, idempotency_key, privacy_accepted_at, created_at, updated_at,
+  ${fee ? "app_fee_units, app_fee_satang" : "0 AS app_fee_units, 0 AS app_fee_satang"}`;
+const BOOKING_COLUMNS = bookingColumns("deposit_satang", true);
+/** Before migration 0027: no booking has an app fee. */
+const BOOKING_COLUMNS_NO_FEE = bookingColumns("deposit_satang", false);
+/** Before migration 0025: no booking has a deposit either. */
+const BOOKING_COLUMNS_LEGACY = bookingColumns("NULL", false);
 
 /** Money received for booking `b` (verified / paid payments). What is still due = total_satang − this. */
 export const PAID_SQL = `(SELECT COALESCE(SUM(${netPayment("p")}), 0) FROM payments p WHERE p.booking_id = b.id)`;
@@ -145,25 +151,22 @@ export function netPayment(p: string): string {
 export class BookingRepository {
   constructor(private readonly db: D1DatabaseLike) {}
 
+  /** One booking by `where` (bound to ?1), readable before the latest booking migrations are applied. */
+  private readBooking(where: string, value: string): Promise<BookingRow | null> {
+    const read = (columns: string) => () => this.db.prepare(`SELECT ${columns} FROM bookings WHERE ${where}`).bind(value).first<BookingRow>();
+    return withFallback(read(BOOKING_COLUMNS), () => withFallback(read(BOOKING_COLUMNS_NO_FEE), read(BOOKING_COLUMNS_LEGACY)));
+  }
+
   findByCode(code: string): Promise<BookingRow | null> {
-    return withFallback(
-      () => this.db.prepare(`SELECT ${BOOKING_COLUMNS} FROM bookings WHERE booking_code = ?1`).bind(code).first<BookingRow>(),
-      () => this.db.prepare(`SELECT ${BOOKING_COLUMNS_LEGACY} FROM bookings WHERE booking_code = ?1`).bind(code).first<BookingRow>(),
-    );
+    return this.readBooking("booking_code = ?1", code);
   }
 
   findById(id: string): Promise<BookingRow | null> {
-    return withFallback(
-      () => this.db.prepare(`SELECT ${BOOKING_COLUMNS} FROM bookings WHERE id = ?1`).bind(id).first<BookingRow>(),
-      () => this.db.prepare(`SELECT ${BOOKING_COLUMNS_LEGACY} FROM bookings WHERE id = ?1`).bind(id).first<BookingRow>(),
-    );
+    return this.readBooking("id = ?1", id);
   }
 
   findByIdempotencyKey(key: string): Promise<BookingRow | null> {
-    return withFallback(
-      () => this.db.prepare(`SELECT ${BOOKING_COLUMNS} FROM bookings WHERE idempotency_key = ?1`).bind(key).first<BookingRow>(),
-      () => this.db.prepare(`SELECT ${BOOKING_COLUMNS_LEGACY} FROM bookings WHERE idempotency_key = ?1`).bind(key).first<BookingRow>(),
-    );
+    return this.readBooking("idempotency_key = ?1", key);
   }
 
   /** The booking's stays in the order chosen (cancelled ones included: see `status` / `cancelled_at`). */
@@ -293,20 +296,28 @@ export class BookingRepository {
     name: string; phone: string; phoneNormalized: string; email: string | null; lineId: string | null; note: string | null;
     accommodationSubtotal: number; foodSubtotal: number; total: number; deposit: number | null; currency: string; expiresAt: string;
     idempotencyKey: string; privacyAcceptedAt: string; now: string;
+    /** App fee (migration 0027): units and satang; the insert trigger holds the credits or refuses the booking. */
+    appFeeUnits?: number; appFeeSatang?: number;
   }): D1PreparedStatementLike {
+    const feeUnits = b.appFeeUnits ?? 0;
+    const fee = b.appFeeSatang ?? 0;
+    // No fee (credit system off): the columns keep their default, so this insert also works before migration 0027.
+    const feeColumns = fee > 0 ? ", app_fee_units, app_fee_satang" : "";
+    const feeValues = fee > 0 ? ", ?24, ?25" : "";
+    const binds: unknown[] = [b.id, b.code, b.lang, b.checkIn, b.checkOut, b.nights, b.adults, b.children, b.name, b.phone, b.phoneNormalized,
+      b.email, b.lineId, b.note, b.accommodationSubtotal, b.foodSubtotal, b.accommodationSubtotal + b.foodSubtotal + fee,
+      b.currency, b.expiresAt, b.idempotencyKey, b.privacyAcceptedAt, b.now, b.deposit, ...(fee > 0 ? [feeUnits, fee] : [])];
     return this.db
       .prepare(
         `INSERT INTO bookings (id, booking_code, language_code, source, check_in, check_out, nights, adults, children,
            customer_name, customer_phone, customer_phone_normalized, customer_email, customer_line_id, customer_note,
            booking_status, payment_status, accommodation_subtotal_satang, food_subtotal_satang, subtotal_satang,
            discount_satang, total_satang, currency, expires_at, idempotency_key, privacy_accepted_at, created_at, updated_at,
-           deposit_satang)
+           deposit_satang${feeColumns})
          VALUES (?1, ?2, ?3, 'WEB', ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, 'PENDING', 'UNPAID', ?15, ?16, ?17, 0, ?17,
-           ?18, ?19, ?20, ?21, ?22, ?22, ?23)`,
+           ?18, ?19, ?20, ?21, ?22, ?22, ?23${feeValues})`,
       )
-      .bind(b.id, b.code, b.lang, b.checkIn, b.checkOut, b.nights, b.adults, b.children, b.name, b.phone, b.phoneNormalized,
-        b.email, b.lineId, b.note, b.accommodationSubtotal, b.foodSubtotal, b.accommodationSubtotal + b.foodSubtotal,
-        b.currency, b.expiresAt, b.idempotencyKey, b.privacyAcceptedAt, b.now, b.deposit);
+      .bind(...binds);
   }
 
   /**
@@ -470,7 +481,7 @@ export class BookingRepository {
     checkIn: string; checkOut: string;
     /** Own-tent camping: tents to give back, and whether its tarp area goes too. */
     tents: number; tarp: boolean;
-    booking: { accommodation: number; total: number; deposit: number | null; adults: number; children: number };
+    booking: { accommodation: number; total: number; deposit: number | null; adults: number; children: number; appFeeSatang: number; appFeeUnits: number; feeChanged: boolean };
   }): D1PreparedStatementLike[] {
     const db = this.db;
     // ?1 = item, ?2 = booking, ?3 = now in every statement after the first.
@@ -489,11 +500,17 @@ export class BookingRepository {
       // The booking without that stay (CHECKs: total = accommodation + food, deposit below the total, an adult left).
       db
         .prepare(
-          `UPDATE bookings SET accommodation_subtotal_satang = ?4, subtotal_satang = ?4 + food_subtotal_satang,
-             total_satang = ?5, deposit_satang = ?6, adults = ?7, children = ?8, updated_at = ?3
-            WHERE id = ?2 AND ${done}`,
+          c.booking.feeChanged
+            ? `UPDATE bookings SET accommodation_subtotal_satang = ?4, subtotal_satang = ?4 + food_subtotal_satang + ?9,
+                 total_satang = ?5, deposit_satang = ?6, adults = ?7, children = ?8, app_fee_satang = ?9, app_fee_units = ?10, updated_at = ?3
+                WHERE id = ?2 AND ${done}`
+            // The app fee stays as it is (none, or already paid): it is still part of the subtotal.
+            : `UPDATE bookings SET accommodation_subtotal_satang = ?4, subtotal_satang = ?4 + food_subtotal_satang + ?9,
+                 total_satang = ?5, deposit_satang = ?6, adults = ?7, children = ?8, updated_at = ?3
+                WHERE id = ?2 AND ${done}`,
         )
-        .bind(...head, c.booking.accommodation, c.booking.total, c.booking.deposit, c.booking.adults, c.booking.children),
+        .bind(...head, c.booking.accommodation, c.booking.total, c.booking.deposit, c.booking.adults, c.booking.children,
+          c.booking.appFeeSatang, ...(c.booking.feeChanged ? [c.booking.appFeeUnits] : [])),
       // Its nights free up for other guests.
       db.prepare(`DELETE FROM booking_unit_nights WHERE booking_item_id = ?1 AND booking_id = ?2 AND ${done}`).bind(...head),
     ];

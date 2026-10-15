@@ -25,6 +25,10 @@ export const NOTIFICATION_TYPES = [
   "GUEST_CANCELLED", // guest: the booking was cancelled (with the reason)
   "GUEST_CHECKIN", // guest: check-in reminder
   "TEST", // staff: test message from the admin
+  "CREDIT_LOW", // back-office users (own LINE): app-usage credits low
+  "CREDIT_EMPTY", // back-office users (own LINE): credits used up, online booking closed
+  "CREDIT_TOPUP_REQUEST", // Super Admin (own LINE): a top-up waits for approval
+  "CREDIT_TOPUP_RESULT", // the user who asked (own LINE): top-up approved / rejected
 ] as const;
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
 

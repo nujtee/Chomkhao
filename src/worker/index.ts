@@ -28,6 +28,7 @@ import { seoController } from "./controllers/seo.controller.ts";
 import { searchController } from "./controllers/search.controller.ts";
 import { systemController } from "./controllers/system.controller.ts";
 import { emailController, paypalController } from "./controllers/notify.controller.ts";
+import { creditController } from "./controllers/credit.controller.ts";
 
 export interface AppOptions {
   /** Override service wiring (tests). */
@@ -71,6 +72,7 @@ export function createApp(options: AppOptions = {}) {
   const system = systemController(services);
   const email = emailController(services);
   const paypal = paypalController(services);
+  const credit = creditController(services);
   const servePage = createPageHandler((request, env, url) => services({ request, env, url }));
 
   const router = new Router()
@@ -265,6 +267,26 @@ export function createApp(options: AppOptions = {}) {
     .post("/api/admin/email/recipients/:id/test", email.testRecipient)
     .get("/api/admin/email/logs", email.logs)
     .post("/api/admin/email/logs/:id/retry", email.retry)
+    // App-usage credits (migration 0027)
+    .get("/api/public/bookings/status", credit.publicStatus)
+    .get("/api/admin/credits/summary", credit.summary)
+    .get("/api/admin/credits/topup-info", credit.topupInfo)
+    .get("/api/admin/credits/topups", credit.topups)
+    .post("/api/admin/credits/topups", credit.submitTopup)
+    .get("/api/admin/credits/topups/:id/slip", credit.slip)
+    .get("/api/admin/credits/ledger", credit.ledger)
+    .get("/api/admin/credit-admin/settings", credit.settings)
+    .put("/api/admin/credit-admin/settings", credit.saveSettings)
+    .get("/api/admin/credit-admin/recipients", credit.recipients)
+    .get("/api/admin/credit-admin/pending", credit.pending)
+    .post("/api/admin/credit-admin/topups/:id/approve", credit.approve)
+    .post("/api/admin/credit-admin/topups/:id/reject", credit.reject)
+    .post("/api/admin/credit-admin/adjustments", credit.adjust)
+    .put("/api/admin/credit-admin/plan", credit.plan)
+    .get("/api/admin/me/line", credit.myLine)
+    .post("/api/admin/me/line/link-code", credit.myLineCode)
+    .get("/api/admin/me/line/link-code/:id", credit.myLineStatus)
+    .delete("/api/admin/me/line", credit.myLineUnlink)
     .post("/api/public/bookings/line-link", line.guestLink)
     .post("/api/public/bookings/line-unlink", line.guestUnlink)
     .post(LINE_WEBHOOK_PATH, line.webhook);
@@ -383,6 +405,8 @@ export function createApp(options: AppOptions = {}) {
       // Meta Conversions API (Phase 14): due Lead / Purchase events, retries and retention.
       const capi = await task("capi", () => s.capi.tick());
       if (capi && (capi.sent || capi.failed || capi.retried)) console.log(JSON.stringify({ level: "info", message: "capi_events", ...capi }));
+      // App-usage credits low / used up: queue today's notices once their time has come (migration 0027).
+      await task("credit_notices", () => s.credits.tick());
       const line = await task("line_notifications", () => s.notifications.tick());
       if (line && (line.planned || line.sent || line.failed || line.retried)) console.log(JSON.stringify({ level: "info", message: "line_notifications", ...line }));
       // E-mail (Zoho Mail / Resend) and PayPal captures left in flight (migration 0023).

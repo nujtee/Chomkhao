@@ -19,6 +19,7 @@ import {
   cartToSelections,
   createBooking,
   fetchFoodCatalogue,
+  fetchBookingStatus,
   fetchQuote,
   newIdempotencyKey,
   type FoodCart,
@@ -96,6 +97,13 @@ export function BookingPage() {
   /** Last tarp choice, kept when the guest goes back to change the stay. */
   const [campingTarp, setCampingTarp] = useState(false);
   const headingRef = useRef<HTMLHeadingElement>(null);
+  /** False when online booking is paused (the site has run out of app credit); null while unknown. */
+  const [onlineOpen, setOnlineOpen] = useState<boolean | null>(null);
+  useEffect(() => {
+    const controller = new AbortController();
+    fetchBookingStatus(controller.signal).then((r) => setOnlineOpen(r.open), () => undefined);
+    return () => controller.abort();
+  }, []);
   const { site } = useSite();
   /** Funnel steps sent once per chosen stay. */
   const sent = useRef({ viewFood: false, begin: false });
@@ -330,6 +338,7 @@ export function BookingPage() {
 
         <h1 className="page__title" tabIndex={-1} ref={headingRef}>{titles[step]}</h1>
         {notice && <p role="alert" className="notice notice--error">{notice}</p>}
+        {!notice && quote?.bookingUnavailable && step !== "done" && <p role="alert" className="notice notice--error">{bt.bookingUnavailable}</p>}
 
         <div className="flow-layout">
           <div className="flow-main">
@@ -391,10 +400,10 @@ export function BookingPage() {
             onClick={() => (index === 0 ? setStep("choose") : go(WIZARD[index - 1]!))}>
             ← {bt.back}
           </button>
-          {step === "food" && <button type="button" className="button button--primary" disabled={!quote || quoting} onClick={() => go("details")}>{bt.next} →</button>}
+          {step === "food" && <button type="button" className="button button--primary" disabled={!quote || quoting || !!quote.bookingUnavailable} onClick={() => go("details")}>{bt.next} →</button>}
           {step === "details" && <button type="submit" form="details-form" className="button button--primary">{bt.next} →</button>}
           {step === "review" && (
-            <button type="button" className="button button--primary" disabled={!quote || quoting || submitting} aria-busy={submitting || undefined}
+            <button type="button" className="button button--primary" disabled={!quote || quoting || submitting || !!quote.bookingUnavailable} aria-busy={submitting || undefined}
               onClick={() => void confirm()}>
               {submitting ? bt.confirming : `${bt.confirm} · ${quote ? formatBaht(quote.totalSatang, locale.code) : ""}`}
             </button>
@@ -435,6 +444,7 @@ export function BookingPage() {
     <div className={`page container${picks.length ? " has-picks-bar" : ""}`}>
       <h1 className="page__title" tabIndex={-1} ref={headingRef}>{t.pages.booking.title}</h1>
       <p className="page__lead">{t.accommodation.chooseDates}</p>
+      {onlineOpen === false && <p className="notice notice--error" role="alert">{bt.onlineClosed}</p>}
 
       <StaySearch initial={query} busy={busy} error={searchError} childAge={data?.camping.childFreeUnderAge} showTents={false}
         onSearch={(q) => {

@@ -11,6 +11,7 @@ import { BalancePay } from "../booking/BalancePay.tsx";
 import { PaymentInstructions } from "../booking/PaymentInstructions.tsx";
 import { SlipStatus, SlipUpload } from "../booking/SlipUpload.tsx";
 import { BookingSummary, useDateTimeText } from "../booking/Summary.tsx";
+import { GuestBillButton } from "../booking/Bill.tsx";
 import { useBookingT } from "../booking/useBookingT.ts";
 import { LineUpdates } from "../booking/LineUpdates.tsx";
 import { paymentSubmittedEvent, useConfirmedBookingEvent } from "../analytics/booking-events.ts";
@@ -139,6 +140,7 @@ export function BookingLookupPage() {
           <BalancePay booking={booking} phone={phone.trim()} onChange={setBooking} />
           <LineUpdates booking={booking} phone={phone.trim()} onChange={setBooking} />
           <BookingSummary quote={booking} />
+          <GuestBillButton booking={booking} />
         </section>
       )}
     </div>

@@ -45,6 +45,9 @@ import { AdminMenuPage } from "./pages/AdminMenuPage.tsx";
 import type { AdminMenuDto } from "../../shared/admin-menu.ts";
 import { ReportPrintPage } from "./reports/ReportPrintPage.tsx";
 import { ReportsPage } from "./reports/ReportsPage.tsx";
+import { CreditTopupPage } from "./credits/CreditTopupPage.tsx";
+import { CreditAdminPage } from "./credits/CreditAdminPage.tsx";
+import { MyAccountPage } from "./credits/MyAccountPage.tsx";
 import "../styles/admin.css";
 
 const PUBLIC_PAGES = new Set(["login", "forgot-password", "reset-password"]);
@@ -262,6 +265,12 @@ function renderPage(segments: string[], notFound: string) {
       return <AdminMenuPage />;
     case "audit-logs":
       return <AuditLogsPage />;
+    case "credit-topup":
+      return <CreditTopupPage />;
+    case "credit-admin":
+      return <CreditAdminPage />;
+    case "my-account":
+      return <MyAccountPage />;
     case "change-password":
       return <ChangePasswordPage forced={false} />;
     default: {

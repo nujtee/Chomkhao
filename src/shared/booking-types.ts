@@ -6,6 +6,7 @@
 import type { StayActionsDto } from "./stay.ts";
 import type { GuestLineDto } from "./line-types.ts";
 import type { BalancePaymentDto, PaymentAccountSnapshotDto, PaymentDto, PaymentInstructionsDto } from "./payment-types.ts";
+import type { AppFeeDto } from "./credit-types.ts";
 
 export type BookingItemType = "HOUSE" | "VIP_TENT" | "OWN_TENT";
 export type BookingStatus = "PENDING" | "CONFIRMED" | "CHECKED_IN" | "CHECKED_OUT" | "CANCELLED" | "EXPIRED" | "NO_SHOW";
@@ -149,6 +150,16 @@ export interface QuoteDto {
    * The rest (totalSatang − depositSatang) is paid at reception before check-in. null = pay the full total now.
    */
   depositSatang: number | null;
+  /**
+   * App-usage fee (migration 0027): units (houses + VIP tents + own tents) × fee per unit, already part of
+   * totalSatang. null / absent = no fee (the credit system is off, or a booking made before it).
+   */
+  appFee?: AppFeeDto | null;
+  /**
+   * Quote only: the property cannot take this booking online right now (not enough app-usage credit for its
+   * units). The guest sees "online booking unavailable — contact us"; creating it answers 409 CREDIT_INSUFFICIENT.
+   */
+  bookingUnavailable?: boolean;
 }
 
 export interface PublicBookingDto extends QuoteDto {

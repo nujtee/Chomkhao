@@ -33,6 +33,7 @@ import type { AuthorizationService } from "./authorization.service.ts";
 import type { PreparedBooking, QuoteInput, QuoteService } from "./quote.service.ts";
 import type { SecurityLogService } from "./security-log.service.ts";
 import type { GuestLineDto } from "../../shared/line-types.ts";
+import type { AppFeeDto } from "../../shared/credit-types.ts";
 import type { OutboxLike } from "./marketing.service.ts";
 import type { Attribution, MarketingRepository } from "../repositories/marketing.repository.ts";
 
@@ -113,6 +114,10 @@ export class BookingService {
       throw new ConflictError("Online booking is temporarily unavailable", "PAYMENT_NOT_CONFIGURED");
     }
     const prepared = await this.quotes.prepare(input);
+    // Not enough app-usage credit for these units (migration 0027); the insert trigger refuses it too.
+    if (prepared.quote.bookingUnavailable) {
+      throw new ConflictError("Online booking is temporarily unavailable", "CREDIT_INSUFFICIENT");
+    }
     if (prepared.quote.totalSatang !== input.expectedTotalSatang) {
       throw new HttpError(409, "PRICE_CHANGED", "The price has changed. Please review the new total.", {
         totalSatang: String(prepared.quote.totalSatang),
@@ -176,6 +181,8 @@ export class BookingService {
         foodSubtotal: q.foodSubtotalSatang,
         total: q.totalSatang,
         deposit: q.depositSatang,
+        appFeeUnits: q.appFee?.units ?? 0,
+        appFeeSatang: q.appFee?.totalSatang ?? 0,
         currency: q.currency,
         expiresAt: iso(addMs(now, p.settings.hold_minutes * 60_000)),
         idempotencyKey: input.idempotencyKey,
@@ -456,13 +463,18 @@ export class BookingService {
     const camping = target.item_type === "OWN_TENT";
     const tarpMoney = camping && tarp?.status === "ACTIVE" ? tarp.subtotal_satang : 0;
     const accommodation = row.accommodation_subtotal_satang - target.snapshot_subtotal_satang - tarpMoney;
-    const total = accommodation + row.food_subtotal_satang - row.discount_satang;
+    // App fee (migration 0027): an unpaid booking stops paying for the stay's units (its credit hold shrinks with it,
+    // trigger); once paid the fee was earned and stays.
+    const unpaid = row.booking_status === "PENDING" && row.app_fee_units > 0;
+    const feeUnits = unpaid ? row.app_fee_units - target.quantity : row.app_fee_units;
+    const appFeeSatang = unpaid ? Math.round(row.app_fee_satang / row.app_fee_units) * feeUnits : row.app_fee_satang;
+    const total = accommodation + row.food_subtotal_satang + appFeeSatang - row.discount_satang;
     const deposit = depositFor(total, left.reduce((acc, i) => acc + i.pay_later_satang, 0));
     const now = iso(this.clock());
     const results = await this.db.batch(this.repo.cancelStayStatements({
       bookingId: row.id, itemId, readAt: row.updated_at, reason, now, checkIn: row.check_in, checkOut: row.check_out,
       tents: camping ? target.quantity : 0, tarp: tarpMoney > 0,
-      booking: { accommodation, total, deposit, adults, children },
+      booking: { accommodation, total, deposit, adults, children, appFeeSatang, appFeeUnits: feeUnits, feeChanged: unpaid },
     }));
     if (!results[0]?.results.length) throw new ConflictError("The booking changed meanwhile, please reload", "BOOKING_CHANGED");
     await this.log.auditStatement(actor.userId, "CANCEL_STAY", "bookings", row.id,
@@ -874,6 +886,7 @@ export class BookingService {
       totalSatang: row.total_satang,
       currency: row.currency,
       depositSatang: row.deposit_satang,
+      appFee: appFeeOf(row),
       paidSatang,
       balanceSatang,
     };
@@ -918,8 +931,17 @@ export class BookingService {
 }
 
 /** Maps database constraint failures from the booking batch to business errors. */
+/** App fee of a booking (migration 0027): units × per unit; null when it has none. */
+export function appFeeOf(row: Pick<BookingRow, "app_fee_units" | "app_fee_satang">): AppFeeDto | null {
+  if (!row.app_fee_units || !row.app_fee_satang) return null;
+  return { units: row.app_fee_units, perUnitSatang: Math.round(row.app_fee_satang / row.app_fee_units), totalSatang: row.app_fee_satang };
+}
+
 export function mapInventoryError(error: unknown): unknown {
   const message = String(error);
+  if (/CREDIT_INSUFFICIENT/.test(message)) {
+    return new ConflictError("Online booking is temporarily unavailable", "CREDIT_INSUFFICIENT");
+  }
   if (/UNIQUE constraint failed: booking_unit_nights/.test(message)) {
     return new ConflictError("This accommodation was just booked by someone else", "UNIT_UNAVAILABLE");
   }

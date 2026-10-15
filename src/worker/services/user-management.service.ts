@@ -215,6 +215,10 @@ export class UserManagementService {
     const ids = await this.rbac.permissionIdsByCode(codes);
     const unknown = codes.filter((c) => !ids.has(c));
     if (unknown.length) throw new ValidationError({ permissions: "UNKNOWN_PERMISSION" });
+    // Credit management is never granted to one user (migration 0027; the database refuses it too).
+    if (overrides.some((o) => o.code === "credits.manage" && o.effect === "GRANT")) {
+      throw new ValidationError({ permissions: "SUPER_ADMIN_ONLY" }, "credits.manage belongs to SUPER_ADMIN only");
+    }
 
     const now = this.now();
     await this.commit([
@@ -297,6 +301,8 @@ export class UserManagementService {
     }
     const ids = await this.rbac.permissionIdsByCode(codes);
     if (codes.some((c) => !ids.has(c))) throw new ValidationError({ permissions: "UNKNOWN_PERMISSION" });
+    // Credit management stays with the SUPER_ADMIN role (migration 0027; the database refuses it too).
+    if (codes.includes("credits.manage")) throw new ValidationError({ permissions: "SUPER_ADMIN_ONLY" }, "credits.manage belongs to SUPER_ADMIN only");
 
     await this.commit([
       ...this.rbac.replaceRolePermissionsStatements(roleId, [...ids.values()]),

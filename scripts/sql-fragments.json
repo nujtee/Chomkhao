@@ -25,10 +25,21 @@
     "ownOrder"
   ],
   "src/worker/repositories/booking.repository.ts": [
+    "c.booking.feeChanged ? `UPDATE bookings SET accommodation_subtotal_satang = ?4, subtotal_satang = ?4 + food_subtotal_satang + ?9, total_satang = ?5, deposit_satang = ?6, adults = ?7, children = ?8, app_fee_satang = ?9, app_fee_units = ?10, updated_at = ?3 WHERE id = ?2 AND ${done}` // The app fee stays as it is (none, or already paid): it is still part of the subtotal. : `UPDATE bookings SET accommodation_subtotal_satang = ?4, subtotal_satang = ?4 + food_subtotal_satang + ?9, total_satang = ?5, deposit_satang = ?6, adults = ?7, children = ?8, updated_at = ?3 WHERE id = ?2 AND ${done}`",
+    "columns",
     "deposit",
     "done",
     "ended",
-    "extra"
+    "extra",
+    "feeColumns",
+    "feeValues",
+    "where"
+  ],
+  "src/worker/repositories/credit.repository.ts": [
+    "changedHere",
+    "decided",
+    "decidedHere",
+    "pending"
   ],
   "src/worker/repositories/dashboard.repository.ts": [
     "select",
@@ -53,6 +64,9 @@
   ],
   "src/worker/repositories/monitoring.repository.ts": [
     "sql"
+  ],
+  "src/worker/repositories/rbac.repository.ts": [
+    "planLock"
   ],
   "src/worker/repositories/search.repository.ts": [
     "Math.max(1, Math.min(1000, Math.floor(limit)))",

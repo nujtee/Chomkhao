@@ -12,6 +12,7 @@ import { BookingStatusBadge, useStayDate } from "./shared.tsx";
 import { MoveDates } from "./MoveDates.tsx";
 import { StayButtons } from "./StayButtons.tsx";
 import { StaysCard } from "./StaysCard.tsx";
+import { AdminBillButton } from "./AdminBillButton.tsx";
 import { staysText } from "./shared.tsx";
 
 export function BookingDetailPage({ code }: { code: string }) {
@@ -74,6 +75,7 @@ export function BookingDetailPage({ code }: { code: string }) {
       <div className="adm-pagehead">
         <h1 className="adm-h1 adm-mono">{b.bookingCode}</h1>
         <BookingStatusBadge status={b.status} />
+        <AdminBillButton booking={b} />
       </div>
       {done && <Alert kind="success">{t.bk.cancelled}</Alert>}
       {stayDone && <Alert kind="success">{stayDone}</Alert>}

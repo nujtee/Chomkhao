@@ -1,4 +1,9 @@
 import type { D1DatabaseLike, D1PreparedStatementLike } from "../env.ts";
+import { withFallback } from "./schema-fallback.ts";
+import { PREMIUM_ONLY_PERMISSIONS } from "../../shared/credit-types.ts";
+
+const SUPER_ADMIN = "EXISTS (SELECT 1 FROM user_roles ur WHERE ur.user_id = ?1 AND ur.role_id = 'role_super_admin')";
+const PREMIUM_ONLY_SQL = PREMIUM_ONLY_PERMISSIONS.map((c) => `'${c}'`).join(", ");
 
 export interface RoleRow {
   id: string;
@@ -13,8 +18,23 @@ export interface RoleRow {
 export class RbacRepository {
   constructor(private readonly db: D1DatabaseLike) {}
 
-  /** Effective permissions = role permissions ∪ user GRANTs − user DENYs. */
+  /**
+   * Effective permissions = role permissions ∪ user GRANTs − user DENYs, then (migration 0027):
+   *   - credits.manage only for a SUPER_ADMIN (whatever the overrides say);
+   *   - while the credit system is on and the property is on the STANDARD plan, Reports / Marketing / Theme
+   *     (PREMIUM_ONLY_PERMISSIONS) are removed for everyone but SUPER_ADMIN.
+   */
   async effectivePermissions(userId: string): Promise<string[]> {
+    // Before migration 0027 the credit tables do not exist: no plan lock (and no credits.manage permission yet).
+    return withFallback(() => this.effectivePermissionsWith(userId, true), () => this.effectivePermissionsWith(userId, false));
+  }
+
+  private async effectivePermissionsWith(userId: string, credits: boolean): Promise<string[]> {
+    const planLock = credits
+      ? `AND NOT (p.code IN (${PREMIUM_ONLY_SQL}) AND NOT ${SUPER_ADMIN}
+                     AND EXISTS (SELECT 1 FROM credit_settings cs JOIN credit_account ca ON ca.id = 1
+                                  WHERE cs.id = 1 AND cs.enabled = 1 AND ca.plan = 'STANDARD'))`
+      : "";
     const { results } = await this.db
       .prepare(
         `SELECT p.code FROM permissions p
@@ -24,6 +44,8 @@ export class RbacRepository {
                           WHERE up.user_id = ?1 AND up.permission_id = p.id AND up.effect = 'GRANT'))
             AND NOT EXISTS (SELECT 1 FROM user_permissions up
                              WHERE up.user_id = ?1 AND up.permission_id = p.id AND up.effect = 'DENY')
+            AND (p.code <> 'credits.manage' OR ${SUPER_ADMIN})
+            ${planLock}
           ORDER BY p.code`,
       )
       .bind(userId)
