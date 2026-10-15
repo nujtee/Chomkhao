@@ -298,11 +298,26 @@ describe("top-ups", () => {
     answer = { kind: "OK", slip: good({ receiverAccountMasked: "xxx-x-x1234-x" }) };
     const elsewhere = await topup(manager, "STANDARD", 500);
     assert.deepEqual(elsewhere.data.topup.verifyReasons, ["RECEIVER_MISMATCH", "receiver:KBANK · xxx-x-x1234-x"], "what EasySlip read is kept for Super Admin");
+
+    // Paid by scanning a K PLUS "receive money" QR: the slip names its 15-digit e-Wallet ID (migration 0028).
+    answer = { kind: "OK", slip: good({ receiverBank: null, receiverAccountMasked: null, receiverProxyMasked: "004xxxxxxxx5858" }) };
+    const wallet = await topup(manager, "STANDARD", 500);
+    assert.deepEqual(wallet.data.topup.verifyReasons, ["RECEIVER_MISMATCH", "receiver:004xxxxxxxx5858"]);
+    const withQr = await h.api<CreditSettingsDto>("PUT", "/api/admin/credit-admin/settings", {
+      token: root, body: { ...SETTINGS, approvalMode: "EASYSLIP", qrReceiver: "004 999 99999 5858" },
+    });
+    assert.equal(withQr.status, 200, JSON.stringify(withQr.body));
+    assert.equal(withQr.data.qrReceiver, "004999999995858");
+    const badQr = await h.api("PUT", "/api/admin/credit-admin/settings", { token: root, body: { ...SETTINGS, qrReceiver: "12ab" } });
+    assert.equal(badQr.error?.details?.qrReceiver, "INVALID_FORMAT");
+    answer = { kind: "OK", slip: good({ receiverBank: null, receiverAccountMasked: null, receiverProxyMasked: "004xxxxxxxx5858" }) };
+    const viaQr = await topup(manager, "STANDARD", 500);
+    assert.equal(viaQr.data.outcome, "APPROVED", JSON.stringify(viaQr.data.topup));
     const reused = (auto.data.topup.transactionRef)!;
     answer = { kind: "OK", slip: good({ transactionRef: reused }) };
     const twice = await topup(manager, "STANDARD", 500);
     assert.deepEqual(twice.data.topup.verifyReasons, ["DUPLICATE_TRANSACTION"]);
-    assert.equal(account().balance, 500);
+    assert.equal(account().balance, 1000, "the first top-up and the one paid through the QR");
   });
 
   it("Super Admin adjusts: add, deduct (never below what unpaid bookings hold), set the plan", async () => {

@@ -45,6 +45,8 @@ export interface SlipExpectation {
   /** Destination from the booking's payment account snapshot. */
   accountNumber: string | null;
   promptpayNumber: string | null;
+  /** More PromptPay IDs that count as ours (e.g. the e-Wallet ID behind a top-up QR). */
+  otherReceivers?: string[];
   /** Was this bank transaction already accepted for another payment? */
   transactionAlreadyUsed: boolean;
 }
@@ -59,7 +61,7 @@ export function evaluateSlip(slip: VerifiedSlip, expect: SlipExpectation): Failu
   if (!Number.isFinite(at)
     || at < Date.parse(expect.notBefore) - DATE_TOLERANCE_MS.before
     || at > Date.parse(expect.now) + DATE_TOLERANCE_MS.after) return "DATE_OUT_OF_RANGE";
-  const targets = [expect.accountNumber, expect.promptpayNumber].filter((x): x is string => !!x).flatMap(withCountryCode);
+  const targets = [expect.accountNumber, expect.promptpayNumber, ...(expect.otherReceivers ?? [])].filter((x): x is string => !!x).flatMap(withCountryCode);
   const candidates = [slip.receiverAccountMasked, slip.receiverProxyMasked].filter((x): x is string => !!x);
   if (!candidates.length) return "RECEIVER_UNCONFIRMED";
   let comparable = false;

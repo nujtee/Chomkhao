@@ -6,6 +6,7 @@ import {
 import { fill } from "../../../shared/i18n/admin-credit-messages.ts";
 import { apiGet, apiRequest } from "../../api/client.ts";
 import { uploadImage } from "../../media/prepareImage.ts";
+import { readPromptpayFromImage } from "./readQr.ts";
 import { Link } from "../../router/Router.tsx";
 import { PageTabs } from "../cms/CmsKit.tsx";
 import { useAdmin } from "../AdminContext.tsx";
@@ -320,7 +321,7 @@ function toDraft(s: CreditSettingsDto): Draft {
     enabled: s.enabled, feePerUnit: String(s.feePerUnit), lowThreshold: String(s.lowThreshold), approvalMode: s.approvalMode,
     standardMin: s.standardMin === null ? "" : String(s.standardMin), premiumMin: s.premiumMin === null ? "" : String(s.premiumMin),
     bankName: s.bankName, accountName: s.accountName, accountNumber: s.accountNumber, promptpayNumber: s.promptpayNumber,
-    qrAssetId: s.qrAssetId, qrUrl: s.qrUrl, notifyEmail: s.notifyEmail, alertTime1: s.alertTime1, alertTime2: s.alertTime2,
+    qrAssetId: s.qrAssetId, qrUrl: s.qrUrl, qrReceiver: s.qrReceiver, notifyEmail: s.notifyEmail, alertTime1: s.alertTime1, alertTime2: s.alertTime2,
   };
 }
 
@@ -330,7 +331,7 @@ function toInput(d: Draft): CreditSettingsInput {
     enabled: d.enabled, feePerUnit: Number(d.feePerUnit), lowThreshold: Number(d.lowThreshold), approvalMode: d.approvalMode,
     standardMin: num(d.standardMin), premiumMin: num(d.premiumMin), bankName: d.bankName?.trim() || null, accountName: d.accountName?.trim() || null,
     accountNumber: d.accountNumber?.trim() || null, promptpayNumber: d.promptpayNumber?.trim() || null, qrAssetId: d.qrAssetId,
-    notifyEmail: d.notifyEmail?.trim() || null, alertTime1: d.alertTime1, alertTime2: d.alertTime2,
+    qrReceiver: d.qrReceiver?.replace(/[\s-]/g, "") || null, notifyEmail: d.notifyEmail?.trim() || null, alertTime1: d.alertTime1, alertTime2: d.alertTime2,
   };
 }
 
@@ -374,11 +375,26 @@ function SettingsTab() {
   const { s, d, set, save, errors, msg, setMsg, busy, setBusy } = useSettings();
   if (!s || !d) return msg ? <Alert kind="error">{msg.text}</Alert> : <p role="status">{t.common.loading}</p>;
 
+  /** Fills the QR's PromptPay ID from the image (read in this browser). */
+  async function readQr(image?: Blob) {
+    try {
+      const blob = image ?? (d?.qrUrl ? await (await fetch(d.qrUrl)).blob() : null);
+      const id = blob ? await readPromptpayFromImage(blob) : null;
+      if (id) {
+        set({ qrReceiver: id });
+        setMsg({ kind: "info", text: fill(m.admin.qrReadDone, { value: id }) });
+      } else setMsg({ kind: "error", text: m.admin.qrReadNone });
+    } catch {
+      setMsg({ kind: "error", text: m.admin.qrReadNone });
+    }
+  }
+
   async function uploadQr(file: File) {
     setBusy(true);
     try {
       const asset = await uploadImage(file, "PAYMENT_QR");
       set({ qrAssetId: asset.id, qrUrl: asset.url });
+      await readQr(file);
     } catch (err) {
       setMsg({ kind: "error", text: creditError(t, m, err) });
     } finally {
@@ -439,6 +455,13 @@ function SettingsTab() {
             </div>
             {errors.qrAssetId && <p className="adm-field__error">{errors.qrAssetId}</p>}
           </div>
+          {d.qrAssetId && (
+            <div className="adm-credit__qr-receiver">
+              <Field label={m.admin.qrReceiver} hint={m.admin.qrReceiverHint} inputMode="numeric" maxLength={24} value={d.qrReceiver ?? ""}
+                error={errors.qrReceiver} onChange={(e) => set({ qrReceiver: e.target.value })} />
+              <Button variant="secondary" onClick={() => void readQr()}>{m.admin.readQr}</Button>
+            </div>
+          )}
         </div>
 
         <div className="adm-card">

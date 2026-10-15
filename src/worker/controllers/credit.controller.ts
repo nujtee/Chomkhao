@@ -48,7 +48,7 @@ function nullableText(v: Validator, body: Record<string, unknown>, key: string, 
 export function parseCreditSettings(body: Record<string, unknown>): CreditSettingsInput {
   const v = new Validator(body).allowOnly([
     "enabled", "feePerUnit", "lowThreshold", "approvalMode", "standardMin", "premiumMin", "bankName", "accountName", "accountNumber",
-    "promptpayNumber", "qrAssetId", "notifyEmail", "alertTime1", "alertTime2",
+    "promptpayNumber", "qrAssetId", "qrReceiver", "notifyEmail", "alertTime1", "alertTime2",
   ]);
   const enabled = v.boolean("enabled", false);
   const feePerUnit = int(v, body, "feePerUnit", { min: 1, max: 100_000, required: true }) ?? 0;
@@ -72,6 +72,16 @@ export function parseCreditSettings(body: Record<string, unknown>): CreditSettin
       else v.errors.promptpayNumber = "INVALID_FORMAT";
     }
   }
+  let qrReceiver: string | null = null;
+  const qr = body.qrReceiver;
+  if (qr !== null && qr !== undefined && qr !== "") {
+    if (typeof qr !== "string") v.errors.qrReceiver = "EXPECTED_STRING";
+    else {
+      const digits = qr.replace(/[\s-]/g, "");
+      if (/^\d{10,20}$/.test(digits)) qrReceiver = digits;
+      else v.errors.qrReceiver = "INVALID_FORMAT";
+    }
+  }
   const qrAssetId = body.qrAssetId === null || body.qrAssetId === undefined || body.qrAssetId === "" ? null : v.string("qrAssetId", { pattern: ID_PATTERN }) ?? null;
   const notifyEmail = body.notifyEmail === null || body.notifyEmail === undefined || body.notifyEmail === "" ? null : v.email("notifyEmail") ?? null;
   const alertTime1 = v.string("alertTime1", { required: true, pattern: TIME }) ?? "09:00";
@@ -81,7 +91,7 @@ export function parseCreditSettings(body: Record<string, unknown>): CreditSettin
   v.assertValid();
   return {
     enabled, feePerUnit, lowThreshold, approvalMode, standardMin, premiumMin, bankName, accountName, accountNumber,
-    promptpayNumber, qrAssetId, notifyEmail, alertTime1, alertTime2,
+    promptpayNumber, qrAssetId, qrReceiver, notifyEmail, alertTime1, alertTime2,
   };
 }
 

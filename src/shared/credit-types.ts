@@ -114,6 +114,8 @@ export interface CreditSettingsDto {
   promptpayNumber: string | null;
   qrAssetId: string | null;
   qrUrl: string | null;
+  /** PromptPay ID the QR pays to (phone / national ID / 15-digit e-Wallet ID), when it is not the number above. */
+  qrReceiver: string | null;
   notifyEmail: string | null;
   alertTime1: string;
   alertTime2: string;
@@ -137,6 +139,8 @@ export interface CreditSettingsInput {
   accountNumber: string | null;
   promptpayNumber: string | null;
   qrAssetId: string | null;
+  /** Optional (older clients omit it → cleared). */
+  qrReceiver: string | null;
   notifyEmail: string | null;
   alertTime1: string;
   alertTime2: string;

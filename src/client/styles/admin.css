@@ -3228,3 +3228,15 @@
 .adm-credit__pay { display: flex; flex-wrap: wrap; gap: 16px 24px; align-items: flex-start; }
 .adm-credit__qr { width: 180px; height: auto; border: 1px solid var(--color-border); border-radius: 8px; background: #fff; }
 .adm-credit__code { font-size: 1.25rem; letter-spacing: 0.06em; }
+
+/* Credit settings: the QR's PromptPay ID (migration 0028) with its "read from QR" button. */
+.adm-credit__qr-receiver {
+  display: grid;
+  gap: 8px;
+  max-width: 32rem;
+  margin-top: 12px;
+}
+
+.adm-credit__qr-receiver > .adm-btn {
+  justify-self: start;
+}

@@ -39,7 +39,8 @@
     "changedHere",
     "decided",
     "decidedHere",
-    "pending"
+    "pending",
+    "sql"
   ],
   "src/worker/repositories/dashboard.repository.ts": [
     "select",

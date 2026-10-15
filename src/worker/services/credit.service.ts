@@ -231,6 +231,7 @@ export class CreditService {
         now,
         accountNumber: s.account_number,
         promptpayNumber: s.promptpay_number,
+        otherReceivers: s.qr_receiver ? [s.qr_receiver] : [],
         transactionAlreadyUsed: used,
       });
       const credited = Math.floor(slip.amountSatang / 100);
@@ -371,6 +372,7 @@ export class CreditService {
       approvalMode: s?.approval_mode ?? "MANUAL", standardMin: s?.standard_min ?? null, premiumMin: s?.premium_min ?? null,
       bankName: s?.bank_name ?? null, accountName: s?.account_name ?? null, accountNumber: s?.account_number ?? null,
       promptpayNumber: s?.promptpay_number ?? null, qrAssetId: s?.qr_asset_id ?? null, qrUrl: publicMediaUrl(s?.qr_key, this.config.mediaBaseUrl),
+      qrReceiver: s?.qr_receiver ?? null,
       notifyEmail: s?.notify_email ?? null, alertTime1: s?.alert_time_1 ?? "09:00", alertTime2: s?.alert_time_2 ?? "17:00",
       verifierConfigured: this.verifier !== null, emailReady, lineReady, updatedAt: s?.updated_at ?? "",
     };
@@ -393,13 +395,19 @@ export class CreditService {
     }
     const before = await this.repo.settings();
     const now = iso(this.clock());
-    await this.db.batch([
-      this.repo.saveSettingsStatement(input, actor.userId, now),
+    const save = (withQrReceiver: boolean) => this.db.batch([
+      this.repo.saveSettingsStatement(input, actor.userId, now, withQrReceiver),
       this.log.auditStatement(actor.userId, "UPDATE_CREDIT_SETTINGS", "credits", "settings", before ? {
         enabled: before.enabled === 1, feePerUnit: before.fee_per_unit, lowThreshold: before.low_threshold, approvalMode: before.approval_mode,
         standardMin: before.standard_min, premiumMin: before.premium_min,
       } : null, { ...input }, meta),
     ]);
+    try {
+      await save(true);
+    } catch (error) {
+      if (!isMissingSchema(error)) throw error;
+      await save(false); // before migration 0028: everything but the QR receiver
+    }
     return this.settingsDto(await this.repo.settings());
   }
 

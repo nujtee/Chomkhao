@@ -14,6 +14,8 @@ export interface CreditSettingsRow {
   promptpay_number: string | null;
   qr_asset_id: string | null;
   qr_key: string | null;
+  /** Migration 0028 (undefined before it). */
+  qr_receiver?: string | null;
   notify_email: string | null;
   alert_time_1: string;
   alert_time_2: string;
@@ -106,16 +108,20 @@ export class CreditRepository {
     return this.db.prepare("SELECT balance, held, plan, updated_at FROM credit_account WHERE id = 1").first<CreditAccountRow>();
   }
 
-  saveSettingsStatement(s: CreditSettingsInput, actorId: string, now: string): D1PreparedStatementLike {
-    return this.db
-      .prepare(
-        `UPDATE credit_settings SET enabled = ?1, fee_per_unit = ?2, low_threshold = ?3, approval_mode = ?4, standard_min = ?5,
+  /** `withQrReceiver` false = before migration 0028 (the column does not exist yet). */
+  saveSettingsStatement(s: CreditSettingsInput, actorId: string, now: string, withQrReceiver = true): D1PreparedStatementLike {
+    const sql = withQrReceiver
+      ? `UPDATE credit_settings SET enabled = ?1, fee_per_unit = ?2, low_threshold = ?3, approval_mode = ?4, standard_min = ?5,
+           premium_min = ?6, bank_name = ?7, account_name = ?8, account_number = ?9, promptpay_number = ?10, qr_asset_id = ?11,
+           notify_email = ?12, alert_time_1 = ?13, alert_time_2 = ?14, updated_by = ?15, updated_at = ?16, qr_receiver = ?17
+          WHERE id = 1`
+      : `UPDATE credit_settings SET enabled = ?1, fee_per_unit = ?2, low_threshold = ?3, approval_mode = ?4, standard_min = ?5,
            premium_min = ?6, bank_name = ?7, account_name = ?8, account_number = ?9, promptpay_number = ?10, qr_asset_id = ?11,
            notify_email = ?12, alert_time_1 = ?13, alert_time_2 = ?14, updated_by = ?15, updated_at = ?16
-          WHERE id = 1`,
-      )
-      .bind(s.enabled ? 1 : 0, s.feePerUnit, s.lowThreshold, s.approvalMode, s.standardMin, s.premiumMin, s.bankName, s.accountName,
-        s.accountNumber, s.promptpayNumber, s.qrAssetId, s.notifyEmail, s.alertTime1, s.alertTime2, actorId, now);
+          WHERE id = 1`;
+    const binds: unknown[] = [s.enabled ? 1 : 0, s.feePerUnit, s.lowThreshold, s.approvalMode, s.standardMin, s.premiumMin, s.bankName, s.accountName,
+      s.accountNumber, s.promptpayNumber, s.qrAssetId, s.notifyEmail, s.alertTime1, s.alertTime2, actorId, now];
+    return this.db.prepare(sql).bind(...(withQrReceiver ? [...binds, s.qrReceiver ?? null] : binds));
   }
 
   // ------------------------------------------------------------------ top-ups

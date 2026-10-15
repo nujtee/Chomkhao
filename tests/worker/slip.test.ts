@@ -345,3 +345,21 @@ describe("slip verifier configuration", () => {
     assert.equal(createSlipVerifier({}), null);
   });
 });
+
+describe("PromptPay QR → receiver ID (migration 0028)", () => {
+  it("reads phone / national ID / e-Wallet ID / biller ID back out of a Thai QR; rejects a broken one", async () => {
+    const { promptpayPayload, promptpayTargetOf, crc16 } = await import("../../src/shared/promptpay.ts");
+    assert.equal(promptpayTargetOf(promptpayPayload("0861944842", null)!), "0861944842");
+    assert.equal(promptpayTargetOf(promptpayPayload("1234567890123", 50_000)!), "1234567890123");
+    assert.equal(promptpayTargetOf(promptpayPayload("004999999995858", null)!), "004999999995858");
+    const bill = (() => {
+      const f = (id: string, v: string) => `${id}${String(v.length).padStart(2, "0")}${v}`;
+      const body = `${f("00", "01")}${f("01", "11")}${f("30", f("00", "A000000677010112") + f("01", "010753600010286") + f("02", "REF1"))}${f("58", "TH")}${f("53", "764")}6304`;
+      return body + crc16(body);
+    })();
+    assert.equal(promptpayTargetOf(bill), "010753600010286");
+    const good = promptpayPayload("0861944842", null)!;
+    assert.equal(promptpayTargetOf(`${good.slice(0, -1)}${good.endsWith("0") ? "1" : "0"}`), null, "wrong CRC");
+    assert.equal(promptpayTargetOf("https://example.com"), null);
+  });
+});
