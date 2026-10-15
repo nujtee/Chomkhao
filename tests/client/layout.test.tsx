@@ -60,7 +60,7 @@ function render(
 describe("Header", () => {
   it("renders the main menu in spec order with localized paths (TH)", () => {
     const html = render("header");
-    const order = ["Home", "Gallery", "จองที่พัก", "ประวัติความเป็นมา"].map((label) => html.indexOf(`>${label}</a>`));
+    const order = ["หน้าหลัก", "คลังภาพ", "จองที่พัก", "เกี่ยวกับเรา"].map((label) => html.indexOf(`>${label}</a>`));
     assert.ok(order.every((i) => i > -1), "all menu labels present");
     assert.deepEqual([...order].sort((a, b) => a - b), order, "menu order");
     for (const href of ["/th/", "/th/gallery", "/th/booking", "/th/history"]) {

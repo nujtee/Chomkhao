@@ -86,10 +86,10 @@ export interface Messages {
 
 export const th: Messages = {
   nav: {
-    home: "Home",
-    gallery: "Gallery",
+    home: "หน้าหลัก",
+    gallery: "คลังภาพ",
     booking: "จองที่พัก",
-    history: "ประวัติความเป็นมา",
+    history: "เกี่ยวกับเรา",
   },
   header: {
     mainNavigation: "เมนูหลัก",
@@ -161,9 +161,9 @@ export const th: Messages = {
     home: { title: "หน้าแรก" },
     accommodation: { title: "ที่พัก" },
     bookingLookup: { title: "ตรวจสอบการจอง" },
-    gallery: { title: "แกลเลอรี" },
+    gallery: { title: "คลังภาพ" },
     booking: { title: "จองที่พัก" },
-    history: { title: "ประวัติความเป็นมา" },
+    history: { title: "เกี่ยวกับเรา" },
     privacy: { title: "นโยบายความเป็นส่วนตัว" },
     notFound: {
       title: "ไม่พบหน้าที่ต้องการ",
