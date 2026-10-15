@@ -35,7 +35,7 @@ export class D1HealthRepository implements HealthRepository {
   async hasTable(name: string, contains?: string): Promise<boolean | undefined> {
     try {
       const row = await this.db
-        .prepare("SELECT 1 AS ok FROM sqlite_master WHERE type = 'table' AND name = ?1 AND (?2 IS NULL OR instr(sql, ?2) > 0)")
+        .prepare("SELECT 1 AS ok FROM sqlite_master WHERE type IN ('table', 'trigger') AND name = ?1 AND (?2 IS NULL OR instr(sql, ?2) > 0)")
         .bind(name, contains ?? null)
         .first<{ ok: number }>();
       return row?.ok === 1;

@@ -244,13 +244,30 @@ describe("RBAC reference data (§29–31)", () => {
     assert.equal(perms("SUPER_ADMIN").length, total);
   });
 
-  it("only SUPER_ADMIN can manage users, roles and permissions", () => {
+  it("only SUPER_ADMIN manages permissions and deletes users; MANAGER (0029) alone adds users and gives roles", () => {
     for (const role of ["MANAGER", "BOOKING_ADMIN", "FINANCE_ADMIN", "CONTENT_ADMIN", "VIEWER"]) {
       const p = perms(role);
-      for (const forbidden of ["users.create", "users.delete", "users.manage_roles", "users.manage_permissions"]) {
+      for (const forbidden of ["users.delete", "users.restore", "users.manage_permissions", "users.force_logout"]) {
         assert.ok(!p.includes(forbidden), `${role} must not have ${forbidden}`);
       }
+      const adds = ["users.create", "users.edit", "users.manage_roles", "users.reset_password", "users.suspend"];
+      if (role === "MANAGER") for (const code of adds) assert.ok(p.includes(code), `MANAGER has ${code}`);
+      else for (const code of adds) assert.ok(!p.includes(code), `${role} must not have ${code}`);
     }
+  });
+
+  it("the SUPER_ADMIN role is granted only by a SUPER_ADMIN (0029 trigger)", () => {
+    const db = SqliteD1.migrated(); // own database: the shared one must ship without user accounts
+    const now = "2027-01-10T00:00:00Z";
+    for (const [id, email] of [["sa1", "sa1@x.test"], ["mg1", "mg1@x.test"], ["new1", "new1@x.test"]] as const) {
+      db.run("INSERT INTO users (id, email, display_name, password_hash, created_at, updated_at) VALUES (?, ?, ?, 'x', ?, ?)", id, email, id, now, now);
+    }
+    db.run("INSERT INTO user_roles (user_id, role_id, granted_by) VALUES ('sa1', 'role_super_admin', NULL)");
+    db.run("INSERT INTO user_roles (user_id, role_id, granted_by) VALUES ('mg1', 'role_manager', 'sa1')");
+    assert.throws(() => db.run("INSERT INTO user_roles (user_id, role_id, granted_by) VALUES ('new1', 'role_super_admin', 'mg1')"),
+      /SUPER_ADMIN_GRANT_REQUIRES_SUPER_ADMIN/);
+    db.run("INSERT INTO user_roles (user_id, role_id, granted_by) VALUES ('new1', 'role_manager', 'mg1')");
+    db.run("INSERT INTO user_roles (user_id, role_id, granted_by) VALUES ('new1', 'role_super_admin', 'sa1')");
   });
 
   it("VIEWER is read-only and cannot see slips", () => {

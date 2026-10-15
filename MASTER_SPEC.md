@@ -151,6 +151,12 @@ All tables are `STRICT`. Every rule above has a test in `tests/db/`.
 | First admin | `npm run admin:bootstrap -- --email … --name …` → SQL with hash only (no-op if an active SUPER_ADMIN exists). |
 | Admin URLs | `/{lang}/admin/*` (`/admin/*` → default language); `noindex`, `no-store`. |
 
+- **Migration 0029 (MANAGER adds users):** MANAGER also holds `users.create`, `users.edit`, `users.manage_roles`,
+  `users.reset_password`, `users.suspend` — it adds back-office users with any role up to MANAGER. SUPER_ADMIN only:
+  granting the SUPER_ADMIN role (service + trigger `trg_user_roles_super_admin_grant` on `user_roles.granted_by`),
+  editing SUPER_ADMIN accounts, per-user overrides, role permissions, delete / restore, force logout. Non-SUPER_ADMINs
+  never see SUPER_ADMIN accounts (list / search / detail → 404) nor the SUPER_ADMIN role in pickers.
+
 ### A.8 Accommodation & availability (Phase 4)
 
 | Topic | Decision |

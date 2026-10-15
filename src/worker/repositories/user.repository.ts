@@ -37,6 +37,8 @@ const LIST_EXTRAS = `
 export interface UserListFilter {
   status?: "ACTIVE" | "SUSPENDED" | "DELETED" | "ALL_ACTIVE";
   query?: string;
+  /** Leave SUPER_ADMIN accounts out (the reader is not a SUPER_ADMIN). */
+  hideSuperAdmins?: boolean;
   limit: number;
   offset: number;
 }
@@ -82,6 +84,10 @@ export class UserRepository {
       };
       if (filter.status === "ALL_ACTIVE" || filter.status === undefined) where.push("u.status <> 'DELETED'");
       else where.push(`u.status = ${next(filter.status)}`);
+      // Not a SUPER_ADMIN: SUPER_ADMIN accounts are not listed at all.
+      if (filter.hideSuperAdmins) {
+        where.push("NOT EXISTS (SELECT 1 FROM user_roles ur WHERE ur.user_id = u.id AND ur.role_id = 'role_super_admin')");
+      }
       if (filter.query) {
         const p = next(containsPattern(filter.query));
         where.push(`(u.email LIKE ${p} ESCAPE '\\' OR u.display_name LIKE ${p} ESCAPE '\\' OR u.username LIKE ${p} ESCAPE '\\')`);

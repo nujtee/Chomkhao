@@ -42,11 +42,32 @@ describe("authorization is enforced by the backend (§34)", () => {
     assert.match(denied[0]!.details_json ?? "", /users\.view/);
   });
 
-  it("MANAGER can view users but cannot create, delete or change roles", async () => {
+  it("MANAGER adds users with any role up to MANAGER, but never SUPER_ADMIN, and cannot delete", async () => {
     assert.equal((await h.api("GET", "/api/admin/users", { token: manager })).status, 200);
-    assert.equal((await create(manager, { email: "n@example.test", displayName: "N" })).status, 403);
+    const added = await create(manager, { email: "n@example.test", displayName: "N", roles: ["MANAGER"] });
+    assert.equal(added.status, 201, JSON.stringify(added.body));
+    assert.deepEqual(added.data.user.roles, ["MANAGER"]);
+    assert.equal((await create(manager, { email: "b@example.test", displayName: "B", roles: ["BOOKING_ADMIN"] })).status, 201);
+    assert.equal((await create(manager, { email: "s@example.test", displayName: "S", roles: ["SUPER_ADMIN"] })).status, 403);
+    assert.equal((await h.api("PUT", "/api/admin/users/staff/roles", { token: manager, body: { roles: ["VIEWER"] } })).status, 200);
+    assert.equal((await h.api("PUT", "/api/admin/users/staff/roles", { token: manager, body: { roles: ["SUPER_ADMIN"] } })).status, 403);
     assert.equal((await h.api("DELETE", "/api/admin/users/staff", { token: manager })).status, 403);
-    assert.equal((await h.api("PUT", "/api/admin/users/staff/roles", { token: manager, body: { roles: ["VIEWER"] } })).status, 403);
+    assert.equal((await h.api("PUT", "/api/admin/users/staff/permissions", { token: manager, body: { grant: ["reports.view"], deny: [] } })).status, 403);
+  });
+
+  it("only a SUPER_ADMIN sees SUPER_ADMIN accounts and the SUPER_ADMIN role", async () => {
+    const list = await h.api<AdminUserListDto>("GET", "/api/admin/users", { token: manager });
+    assert.deepEqual(list.data.items.map((u) => u.id).sort(), ["mgr", "staff", "viewer"]);
+    assert.equal(list.data.total, 3);
+    const searched = await h.api<AdminUserListDto>("GET", "/api/admin/users?q=root", { token: manager });
+    assert.equal(searched.data.total, 0);
+    assert.equal((await h.api("GET", "/api/admin/users/root", { token: manager })).status, 404);
+    const roles = await h.api<RoleDto[]>("GET", "/api/admin/roles?lang=th", { token: manager });
+    assert.ok(!roles.data.some((r) => r.code === "SUPER_ADMIN"));
+    // The SUPER_ADMIN still sees everyone.
+    assert.equal((await h.api<AdminUserListDto>("GET", "/api/admin/users", { token: root })).data.total, 4);
+    assert.equal((await h.api("GET", "/api/admin/users/root", { token: root })).status, 200);
+    assert.ok((await h.api<RoleDto[]>("GET", "/api/admin/roles?lang=th", { token: root })).data.some((r) => r.code === "SUPER_ADMIN"));
   });
 
   it("a per-user DENY removes a role permission immediately", async () => {
@@ -316,7 +337,7 @@ describe("update, roles and role permissions", () => {
   });
 
   it("lists roles with localized names and permissions; SUPER_ADMIN edits another role", async () => {
-    const roles = await h.api<RoleDto[]>("GET", "/api/admin/roles?lang=zh-cn", { token: manager });
+    const roles = await h.api<RoleDto[]>("GET", "/api/admin/roles?lang=zh-cn", { token: root });
     assert.equal(roles.data.length, 6);
     assert.equal(roles.data[0]!.name, "超级管理员");
     assert.equal(roles.data[0]!.permissions.length, PERMISSION_CODES.length);
