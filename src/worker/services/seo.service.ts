@@ -1,4 +1,5 @@
 import type { PublicSiteDto } from "../../shared/api-types.ts";
+import { splitPhones } from "../../shared/phones.ts";
 import type { PublicUnitDto } from "../../shared/accommodation-types.ts";
 import { formatBaht } from "../../shared/booking-rules.ts";
 import { getMessages } from "../../shared/i18n/index.ts";
@@ -272,7 +273,7 @@ export class SeoService {
           url: homeUrl,
           logo: this.abs(site.logo.main?.url),
           image: this.abs(site.logo.main?.url),
-          telephone: site.contact.phone,
+          telephone: splitPhones(site.contact.phone)[0] ?? null, // Google takes one number: the first
           email: site.contact.email,
           address: site.contact.address ? { "@type": "PostalAddress", streetAddress: site.contact.address } : null,
           geo: extras.latitude !== null && extras.longitude !== null

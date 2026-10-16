@@ -139,7 +139,7 @@ export function WebsiteSettingsPage() {
               <Field label={c.site.footerText} lang={lang} value={tr.footerText ?? ""} maxLength={500} onChange={(e) => setTr("footerText", e.currentTarget.value)} />
             </div>
             <div className="adm-grid2">
-              <Field label={c.site.contactPhone} type="tel" value={form.contactPhone ?? ""} error={err("contactPhone")} onChange={(e) => setForm({ ...form, contactPhone: e.currentTarget.value })} />
+              <Field label={c.site.contactPhone} hint={c.site.contactPhoneHint} type="text" inputMode="tel" maxLength={200} value={form.contactPhone ?? ""} error={err("contactPhone")} onChange={(e) => setForm({ ...form, contactPhone: e.currentTarget.value })} />
               <Field label={c.site.contactEmail} type="email" value={form.contactEmail ?? ""} error={err("contactEmail")} onChange={(e) => setForm({ ...form, contactEmail: e.currentTarget.value })} />
               <Field label={c.site.lineOaUrl} type="url" value={form.lineOaUrl ?? ""} error={err("lineOaUrl")} onChange={(e) => setForm({ ...form, lineOaUrl: e.currentTarget.value })} />
               <Field label={c.site.mapUrl} type="url" value={form.mapUrl ?? ""} error={err("mapUrl")} onChange={(e) => setForm({ ...form, mapUrl: e.currentTarget.value })} />

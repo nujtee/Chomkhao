@@ -46,6 +46,24 @@ describe("website settings & branding (spec §36–37)", () => {
     assert.equal(pub.footerText, "ข้อความท้ายเว็บ", "falls back to the default language");
     assert.equal(pub.contact.phone, "081-234-5678");
 
+    // Several numbers: each is checked, stored as "a, b".
+    const two = await h.api<WebsiteSettingsDto>("PUT", "/api/admin/settings/website", {
+      token: web, body: { contactPhone: " 0637951218,0955790679 ", translations: { th: { siteName: "บ้านทดสอบ" } } },
+    });
+    assert.equal(two.status, 200, JSON.stringify(two.body));
+    assert.equal(two.data.contactPhone, "0637951218, 0955790679");
+    const badOne = await h.api("PUT", "/api/admin/settings/website", {
+      token: web, body: { contactPhone: "0637951218, call me", translations: { th: { siteName: "บ้านทดสอบ" } } },
+    });
+    assert.equal(badOne.error?.details?.contactPhone, "INVALID_FORMAT");
+    const tooMany = await h.api("PUT", "/api/admin/settings/website", {
+      token: web, body: { contactPhone: "0811111111, 0822222222, 0833333333, 0844444444, 0855555555, 0866666666", translations: { th: { siteName: "บ้านทดสอบ" } } },
+    });
+    assert.equal(tooMany.error?.details?.contactPhone, "INVALID_FORMAT");
+    await h.api("PUT", "/api/admin/settings/website", {
+      token: web, body: { contactPhone: "081-234-5678", translations: { th: { siteName: "บ้านทดสอบ", footerText: "ข้อความท้ายเว็บ" }, en: { siteName: "Test House" } } },
+    });
+
     const brand = await staff(h, ["settings.branding"]);
     assert.equal((await h.api("PUT", "/api/admin/settings/branding", { token: web, body: { logoMain: null } })).status, 403);
     const logo = await image(h, brand, "LOGO");

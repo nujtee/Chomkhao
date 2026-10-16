@@ -36,3 +36,17 @@ describe("adminNextSegments (return to the opened admin page after signing in)",
     }
   });
 });
+
+describe("contact phone field with several numbers", async () => {
+  const { normalizePhones, splitPhones, telHref } = await import("../../src/shared/phones.ts");
+  it("splits on , ; / and new lines; checks each number", () => {
+    assert.deepEqual(splitPhones("0637951218, 0955790679"), ["0637951218", "0955790679"]);
+    assert.deepEqual(splitPhones("063-795-1218 / +66 95 579 0679;\n"), ["063-795-1218", "+66 95 579 0679"]);
+    assert.deepEqual(splitPhones(null), []);
+    assert.equal(normalizePhones("0637951218,0955790679"), "0637951218, 0955790679");
+    assert.equal(normalizePhones("0637951218, hello"), null);
+    assert.equal(normalizePhones("12-34"), null, "too short");
+    assert.equal(normalizePhones(""), "");
+    assert.equal(telHref("+66 95-579-0679"), "tel:+66955790679");
+  });
+});

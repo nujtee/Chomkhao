@@ -337,6 +337,7 @@ const th = {
     address: "ที่อยู่",
     footerText: "ข้อความท้ายเว็บ",
     contactPhone: "โทรศัพท์",
+    contactPhoneHint: "ใส่ได้หลายเบอร์ (สูงสุด 5) คั่นด้วยจุลภาค เช่น 063 795 1218, 095 579 0679",
     contactEmail: "อีเมล",
     lineOaUrl: "ลิงก์ LINE OA (https://)",
     mapUrl: "ลิงก์แผนที่ (https://)",
@@ -745,7 +746,7 @@ const en: AdminCmsMessages = {
   },
   site: {
     title: "Website settings", general: "General", siteName: "Website name", tagline: "Tagline", address: "Address",
-    footerText: "Footer text", contactPhone: "Phone", contactEmail: "Email", lineOaUrl: "LINE OA link (https://)",
+    footerText: "Footer text", contactPhone: "Phone", contactPhoneHint: "Up to 5 numbers, separated by commas, e.g. 063 795 1218, 095 579 0679", contactEmail: "Email", lineOaUrl: "LINE OA link (https://)",
     mapUrl: "Map link (https://)", latitude: "Latitude", longitude: "Longitude",
     fixed: "Default language {lang} · time zone {tz} · currency {currency}",
   },
@@ -980,7 +981,7 @@ const zhCN: AdminCmsMessages = {
   },
   site: {
     title: "网站设置", general: "基本信息", siteName: "网站名称", tagline: "标语", address: "地址", footerText: "页脚文字",
-    contactPhone: "电话", contactEmail: "邮箱", lineOaUrl: "LINE 官方账号链接（https://）", mapUrl: "地图链接（https://）",
+    contactPhone: "电话", contactPhoneHint: "最多 5 个号码，用逗号分隔，例如 063 795 1218, 095 579 0679", contactEmail: "邮箱", lineOaUrl: "LINE 官方账号链接（https://）", mapUrl: "地图链接（https://）",
     latitude: "纬度", longitude: "经度", fixed: "默认语言 {lang} · 时区 {tz} · 货币 {currency}",
   },
   brand: {

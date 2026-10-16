@@ -1,3 +1,5 @@
+import { Fragment } from "react";
+import { splitPhones, telHref } from "../../shared/phones.ts";
 import { pagePath, type PublicPage } from "../../shared/routes.ts";
 import { useConsent } from "../consent/ConsentProvider.tsx";
 import { useI18n } from "../i18n/I18nProvider.tsx";
@@ -32,7 +34,14 @@ export function Footer({ currentPage }: { currentPage: PublicPage | null }) {
             {site.contact.address && <p>{site.contact.address}</p>}
             {(site.contact.phone || site.contact.email) && (
               <p className="site-footer__reach">
-                {site.contact.phone && <span>{t.footer.phone}: <a href={`tel:${site.contact.phone.replace(/[^\d+]/g, "")}`}>{site.contact.phone}</a></span>}
+                {site.contact.phone && (
+                  <span>
+                    {t.footer.phone}:{" "}
+                    {splitPhones(site.contact.phone).map((p, i) => (
+                      <Fragment key={p}>{i > 0 && ", "}<a href={telHref(p)}>{p}</a></Fragment>
+                    ))}
+                  </span>
+                )}
                 {site.contact.email && <span>{t.footer.email}: <a href={`mailto:${site.contact.email}`}>{site.contact.email}</a></span>}
               </p>
             )}

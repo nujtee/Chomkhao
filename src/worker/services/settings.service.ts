@@ -6,6 +6,7 @@ import {
   type SiteTextsDto, type ThemeAdminDto, type ThemeVersionDto, type WebsiteSettingsDto,
 } from "../../shared/settings-types.ts";
 import { THEME_PRESETS, validateThemeTokens, type ThemePreset, type ThemeTokens } from "../../shared/theme.ts";
+import { normalizePhones } from "../../shared/phones.ts";
 import type { D1DatabaseLike } from "../env.ts";
 import { ConflictError, NotFoundError } from "../http/errors.ts";
 import type { SettingsRepository, ThemeVersionRow } from "../repositories/settings.repository.ts";
@@ -19,7 +20,6 @@ import { ctaPages, fontFaces } from "./site.service.ts";
 import type { FontRepository } from "../repositories/font.repository.ts";
 import type { PublicFontFaceDto } from "../../shared/media-types.ts";
 
-const PHONE = /^[0-9+()\- ]{6,30}$/;
 const GA4_ID = /^G-[A-Z0-9]{4,20}$/;
 const PIXEL_ID = /^\d{5,20}$/;
 const GSC_TOKEN = /^[A-Za-z0-9_-]{10,100}$/;
@@ -82,7 +82,14 @@ export class SettingsService {
   async saveWebsite(actor: AuthContext, body: Body, meta: RequestMeta): Promise<WebsiteSettingsDto> {
     await this.authz.requirePermission(actor, "settings.website", meta);
     const v = new Validator(body).allowOnly(["contactPhone", "contactEmail", "lineOaUrl", "mapUrl", "latitude", "longitude", "translations"]);
-    const contactPhone = v.string("contactPhone", { pattern: PHONE }) ?? null;
+    // Several numbers allowed ("063…, 095…"): each is checked; stored as "a, b".
+    let contactPhone: string | null = null;
+    const rawPhone = v.string("contactPhone", { max: 200 });
+    if (rawPhone) {
+      const phones = normalizePhones(rawPhone);
+      if (phones === null) v.errors.contactPhone = "INVALID_FORMAT";
+      else contactPhone = phones || null;
+    }
     const contactEmail = v.email("contactEmail") ?? null;
     const lineOaUrl = httpsUrl(v, "lineOaUrl");
     const mapUrl = httpsUrl(v, "mapUrl");
